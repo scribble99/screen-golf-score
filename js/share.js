@@ -14,12 +14,19 @@ const COLORS = {
 };
 
 // Fonts for the shared image run ~2.2x bigger than the on-screen stats
-// table (readable at a glance in a chat thread), so the image ends up
-// taller/narrower than the screen view — that's expected.
+// table, so it's readable at a glance in a chat thread. Crucially, the
+// COLUMN WIDTHS only grow a little (WIDTH_SCALE) — if they grew by the same
+// factor as the font, the image would just be a uniformly-scaled copy, and
+// since apps resize a shared image to fit the thread width anyway, the text
+// would look exactly as big as before (this was the bug in the first pass).
+// Keeping the width nearly fixed while the font (and therefore row height)
+// grows is what actually makes the text take up more of the image —
+// producing a taller, narrower image, which is expected/fine.
 const FONT_SCALE = 2.2;
-const COL_LABEL_W = 170 * FONT_SCALE;
+const WIDTH_SCALE = 1.25;
+const COL_LABEL_W = 170 * WIDTH_SCALE;
 const ROW_H = 30 * FONT_SCALE;
-const PAD_X = 12 * FONT_SCALE;
+const PAD_X = 12 * WIDTH_SCALE;
 const LABEL_LINE_H = 18 * FONT_SCALE;
 const VALUE_LINE_H = 16 * FONT_SCALE;
 const FONT_TITLE = `bold ${Math.round(18 * FONT_SCALE)}px "Malgun Gothic", sans-serif`;
@@ -128,7 +135,7 @@ function rowHeight(ctx, row) {
 async function buildShareImageCanvas(result) {
   const { names, rows } = buildRows(result);
   const scale = 2;
-  const colW = 150 * FONT_SCALE;
+  const colW = 150 * WIDTH_SCALE;
   const width = COL_LABEL_W + colW * 3;
   const titleH = 56 * FONT_SCALE;
   const playerHeaderH = 36 * FONT_SCALE;
