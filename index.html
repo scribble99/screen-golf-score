@@ -104,7 +104,24 @@
   <script src="js/app.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('service-worker.js');
+      // Chrome only re-checks a registered service worker for changes on its
+      // own schedule (as infrequently as once a day), so without forcing a
+      // check here a fresh deploy can sit unnoticed well after the app is
+      // reopened. Force a check on every load/foreground, and reload once a
+      // new version actually takes over so the update is visible right away.
+      navigator.serviceWorker.register('service-worker.js').then((reg) => {
+        reg.update();
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') reg.update();
+        });
+      });
+
+      let reloadedForUpdate = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (reloadedForUpdate) return;
+        reloadedForUpdate = true;
+        location.reload();
+      });
     }
   </script>
 </body>
