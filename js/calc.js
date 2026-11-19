@@ -24,12 +24,17 @@ function computeHandicap(priorScores) {
 }
 
 // RANK.AVG, ascending (lowest value = rank 1), ties share the average rank.
+// Uses an epsilon instead of strict equality — subtracting two handicaps
+// from two scores (e.g. 7 - 2.8 vs 18 - 13.8) can land a hair apart in
+// floating point even though they're the same value, which would otherwise
+// turn a real tie into two different ranks.
+const RANK_EPSILON = 1e-9;
 function rankAvgMap(valuesObj) {
   const entries = Object.entries(valuesObj);
   const result = {};
   for (const [pid, val] of entries) {
-    const equal = entries.filter(([, v]) => v === val).length;
-    const less = entries.filter(([, v]) => v < val).length;
+    const equal = entries.filter(([, v]) => Math.abs(v - val) < RANK_EPSILON).length;
+    const less = entries.filter(([, v]) => val - v > RANK_EPSILON).length;
     result[pid] = less + (equal + 1) / 2;
   }
   return result;
@@ -59,6 +64,51 @@ function sortGames(games) {
   });
 }
 
+// The original Excel sheet used a different handicap formula ("최근 5경기
+// 단순평균") for the games right after ranking officially started, before
+// switching to the documented "최근 10경기 최고·최저 제외 평균" rule used
+// everywhere else (and by this app). LEGACY_HANDICAP_AFTER[i] is the
+// Excel-computed handicap *after* ranked game i (0-based; ranked game 0 is
+// the sheet's row 38) for each of the 29 games this applies to — used as
+// handicapBefore for the following game, so the historical rank/stat
+// breakdown matches the spreadsheet exactly instead of only the final
+// handicap number.
+const LEGACY_HANDICAP_AFTER = [
+  { kim_hm: -4.2, kim_mk: 5.6, park: 13.2 },
+  { kim_hm: -4.8, kim_mk: 8.4, park: 13 },
+  { kim_hm: -4.4, kim_mk: 8.6, park: 14.6 },
+  { kim_hm: -5, kim_mk: 9.2, park: 15.2 },
+  { kim_hm: -5, kim_mk: 8.6, park: 13.4 },
+  { kim_hm: -5.6, kim_mk: 10, park: 12.8 },
+  { kim_hm: -6, kim_mk: 8, park: 14.6 },
+  { kim_hm: -5.8, kim_mk: 8.2, park: 13.4 },
+  { kim_hm: -6, kim_mk: 9.2, park: 13.6 },
+  { kim_hm: -6.2, kim_mk: 10.4, park: 12 },
+  { kim_hm: -5.6, kim_mk: 8.8, park: 14.8 },
+  { kim_hm: -5.2, kim_mk: 8.4, park: 13 },
+  { kim_hm: -4.8, kim_mk: 10.2, park: 14.8 },
+  { kim_hm: -5.6, kim_mk: 7.6, park: 13.4 },
+  { kim_hm: -6.2, kim_mk: 6.8, park: 14.4 },
+  { kim_hm: -5.4, kim_mk: 7.4, park: 13 },
+  { kim_hm: -7, kim_mk: 7.8, park: 13 },
+  { kim_hm: -6.8, kim_mk: 3.8, park: 10.8 },
+  { kim_hm: -5.4, kim_mk: 4.4, park: 13 },
+  { kim_hm: -5, kim_mk: 4.2, park: 14.4 },
+  { kim_hm: -6.6, kim_mk: 2.6, park: 15.4 },
+  { kim_hm: -4.6, kim_mk: 2.8, park: 13.8 },
+  { kim_hm: -4.8, kim_mk: 5.2, park: 15 },
+  { kim_hm: -4, kim_mk: 5.4, park: 11.6 },
+  { kim_hm: -3.4, kim_mk: 4.2, park: 10.4 },
+  { kim_hm: -1.8, kim_mk: 4.4, park: 9 },
+  { kim_hm: -3.4, kim_mk: 6.8, park: 11.4 },
+  { kim_hm: -3.8, kim_mk: 6.4, park: 8.6 },
+  { kim_hm: -5, kim_mk: 7.2, park: 10.6 },
+];
+
+// Likewise hand-entered in the Excel sheet for the very first ranked game
+// (no handicap history existed yet to fall back on).
+const LEGACY_FIRST_GAME_RANK = { kim_hm: 2, kim_mk: 3, park: 1 };
+
 // Walks the games chronologically, computing the handicap that was in
 // effect going into each game, the handicap-adjusted score, and both
 // ranks (handicap-reflected / raw).
@@ -69,9 +119,10 @@ function computeTimeline(games) {
   const timeline = [];
 
   sorted.forEach((game, idx) => {
+    const legacy = LEGACY_HANDICAP_AFTER[idx - 1];
     const handicapBefore = {};
     PLAYER_IDS.forEach((p) => {
-      handicapBefore[p] = computeHandicap(history[p]);
+      handicapBefore[p] = legacy ? legacy[p] : computeHandicap(history[p]);
     });
 
     const hasFullHandicap = PLAYER_IDS.every((p) => handicapBefore[p] !== null);
@@ -81,7 +132,10 @@ function computeTimeline(games) {
     });
 
     const rankRaw = rankAvgMap(game.scores);
-    const rankAdj = hasFullHandicap ? rankAvgMap(adjusted) : rankRaw;
+    // The very first ranked game in the Excel sheet has no prior handicap
+    // history either, but its rank was hand-entered rather than falling
+    // back to the raw-score rank — reproduce that exact value.
+    const rankAdj = idx === 0 ? { ...LEGACY_FIRST_GAME_RANK } : hasFullHandicap ? rankAvgMap(adjusted) : rankRaw;
 
     timeline.push({ ...game, handicapBefore, adjusted, rankRaw, rankAdj });
 
@@ -165,21 +219,28 @@ function computeStats(games) {
   return { timeline, stats, recentGames, justDropped, totalGames: n };
 }
 
-// Every unique pair of players, with the absolute gap between their current
-// handicaps (e.g. "박프로장난아-이기적비거리" → |12.3 − (−9.0)| = 21.3).
+function round1(v) {
+  return v === null || v === undefined ? null : Math.round(v * 10) / 10;
+}
+
+// Every unique pair of players, with the gap between their current
+// handicaps — computed from the *rounded* (1-decimal, same as displayed)
+// handicaps, so the shown numbers are internally consistent
+// (e.g. displayed 13.8 and −2.9 → gap shows 16.7, not 16.6 from the
+// unrounded 13.75 − (−2.875)).
 function computeHandicapGaps(stats) {
   const pairs = [];
   for (let i = 0; i < PLAYER_IDS.length; i++) {
     for (let j = i + 1; j < PLAYER_IDS.length; j++) {
       const a = PLAYER_IDS[i];
       const b = PLAYER_IDS[j];
-      const ha = stats[a].handicap;
-      const hb = stats[b].handicap;
+      const ha = round1(stats[a].handicap);
+      const hb = round1(stats[b].handicap);
       pairs.push({
         a,
         b,
         label: `${playerName(a)}-${playerName(b)}`,
-        gap: ha !== null && hb !== null ? Math.abs(ha - hb) : null,
+        gap: ha !== null && hb !== null ? round1(Math.abs(ha - hb)) : null,
       });
     }
   }

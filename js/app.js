@@ -3,6 +3,7 @@ let lastResult = null;
 
 async function init() {
   await GolfDB.seedIfEmpty(SEED_GAMES);
+  await migrateSeedFields();
   const displayNames = await GolfDB.getSetting('displayNames', {});
   setPlayerDisplayNames(displayNames);
 
@@ -13,6 +14,22 @@ async function init() {
   wireOcr();
   wireSettings();
   await consumePendingShare();
+}
+
+// seedIfEmpty only runs once (when the DB is empty), so anyone who had
+// already installed the app before a field (e.g. 전장/yardage) was added to
+// SEED_GAMES would never get it. This fills in just that missing field on
+// already-seeded games, matched by (date, course) — it never touches a
+// field the user has actually filled in.
+async function migrateSeedFields() {
+  const games = await GolfDB.getAllGames();
+  const seedByKey = new Map(SEED_GAMES.map((g) => [`${g.date}|${g.course}`, g]));
+  for (const g of games) {
+    const seed = seedByKey.get(`${g.date}|${g.course}`);
+    if (seed && seed.yardage && !g.yardage) {
+      await GolfDB.updateGame({ ...g, yardage: seed.yardage });
+    }
+  }
 }
 
 async function reloadGames() {
@@ -124,7 +141,13 @@ function renderGap(result) {
     return;
   }
   const gaps = computeHandicapGaps(result.stats);
-  let html = '<table class="list-table"><thead><tr><th>대결</th><th>핸디 격차</th></tr></thead><tbody>';
+  let html = '<table class="list-table"><thead><tr><th>선수</th><th>핸디</th></tr></thead><tbody>';
+  PLAYER_IDS.forEach((p) => {
+    const h = round1(result.stats[p].handicap);
+    html += `<tr><td>${playerName(p)}</td><td>${h === null ? '-' : fmtScore(h)}</td></tr>`;
+  });
+  html += '</tbody></table><br>';
+  html += '<table class="list-table"><thead><tr><th>대결</th><th>핸디 격차</th></tr></thead><tbody>';
   gaps.forEach((g) => {
     html += `<tr><td>${g.label}</td><td>${g.gap === null ? '-' : g.gap.toFixed(1)}</td></tr>`;
   });

@@ -13,9 +13,21 @@ const COLORS = {
   accent: '#1b5e3a',
 };
 
-const COL_LABEL_W = 170;
-const ROW_H = 30;
-const PAD_X = 12;
+// Fonts for the shared image run ~2.2x bigger than the on-screen stats
+// table (readable at a glance in a chat thread), so the image ends up
+// taller/narrower than the screen view — that's expected.
+const FONT_SCALE = 2.2;
+const COL_LABEL_W = 170 * FONT_SCALE;
+const ROW_H = 30 * FONT_SCALE;
+const PAD_X = 12 * FONT_SCALE;
+const LABEL_LINE_H = 18 * FONT_SCALE;
+const VALUE_LINE_H = 16 * FONT_SCALE;
+const FONT_TITLE = `bold ${Math.round(18 * FONT_SCALE)}px "Malgun Gothic", sans-serif`;
+const FONT_PLAYER_HEADER = `bold ${Math.round(14 * FONT_SCALE)}px "Malgun Gothic", sans-serif`;
+const FONT_LABEL = `${Math.round(13 * FONT_SCALE)}px "Malgun Gothic", sans-serif`;
+const FONT_LABEL_BOLD = `bold ${Math.round(12 * FONT_SCALE)}px "Malgun Gothic", sans-serif`;
+const FONT_VALUE = `${Math.round(13 * FONT_SCALE)}px "Malgun Gothic", sans-serif`;
+const FONT_VALUE_BOLD = `bold ${Math.round(13 * FONT_SCALE)}px "Malgun Gothic", sans-serif`;
 
 function fmtNum(v, digits = 0) {
   if (v === null || v === undefined || Number.isNaN(v)) return '-';
@@ -42,7 +54,7 @@ function fmtScore(v) {
 }
 
 function buildRows(result) {
-  const order = STATS_DISPLAY_ORDER;
+  const order = PLAYER_IDS;
   const names = order.map(playerName);
   const rows = [];
 
@@ -108,24 +120,24 @@ function wrapLabel(ctx, label, maxWidth) {
   return lines;
 }
 
-function rowHeight(ctx, row, colW) {
+function rowHeight(ctx, row) {
   const labelLines = wrapLabel(ctx, row.label, COL_LABEL_W - PAD_X * 2);
-  return Math.max(ROW_H, labelLines.length * 18 + 12);
+  return Math.max(ROW_H, labelLines.length * LABEL_LINE_H + 12 * FONT_SCALE);
 }
 
 async function buildShareImageCanvas(result) {
   const { names, rows } = buildRows(result);
   const scale = 2;
-  const colW = 150;
+  const colW = 150 * FONT_SCALE;
   const width = COL_LABEL_W + colW * 3;
-  const titleH = 56;
-  const playerHeaderH = 36;
+  const titleH = 56 * FONT_SCALE;
+  const playerHeaderH = 36 * FONT_SCALE;
 
   const measureCanvas = document.createElement('canvas');
   const mctx = measureCanvas.getContext('2d');
-  mctx.font = '13px "Malgun Gothic", sans-serif';
-  const heights = rows.map((r) => rowHeight(mctx, r, colW));
-  const totalHeight = titleH + playerHeaderH + heights.reduce((a, b) => a + b, 0) + 16;
+  mctx.font = FONT_LABEL;
+  const heights = rows.map((r) => rowHeight(mctx, r));
+  const totalHeight = titleH + playerHeaderH + heights.reduce((a, b) => a + b, 0) + 16 * FONT_SCALE;
 
   const canvas = document.createElement('canvas');
   canvas.width = width * scale;
@@ -139,7 +151,7 @@ async function buildShareImageCanvas(result) {
   ctx.fillStyle = COLORS.headerBg;
   ctx.fillRect(0, 0, width, titleH);
   ctx.fillStyle = COLORS.headerText;
-  ctx.font = 'bold 18px "Malgun Gothic", sans-serif';
+  ctx.font = FONT_TITLE;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(LEAGUE_TITLE, width / 2, titleH / 2);
@@ -150,7 +162,7 @@ async function buildShareImageCanvas(result) {
   ctx.strokeStyle = COLORS.border;
   ctx.strokeRect(0, y, width, playerHeaderH);
   ctx.fillStyle = COLORS.text;
-  ctx.font = 'bold 14px "Malgun Gothic", sans-serif';
+  ctx.font = FONT_PLAYER_HEADER;
   names.forEach((name, i) => {
     const x = COL_LABEL_W + colW * i + colW / 2;
     ctx.fillText(name, x, y + playerHeaderH / 2);
@@ -167,15 +179,14 @@ async function buildShareImageCanvas(result) {
     ctx.strokeRect(0, y, width, h);
 
     ctx.fillStyle = isSection || isHighlight ? COLORS.accent : COLORS.text;
-    ctx.font = isSection || isHighlight ? 'bold 12px "Malgun Gothic", sans-serif' : '13px "Malgun Gothic", sans-serif';
+    ctx.font = isSection || isHighlight ? FONT_LABEL_BOLD : FONT_LABEL;
     ctx.textAlign = 'left';
     const lines = wrapLabel(ctx, row.label, COL_LABEL_W - PAD_X * 2);
-    const lineH = 16;
-    const startY = y + h / 2 - ((lines.length - 1) * lineH) / 2;
-    lines.forEach((line, li) => ctx.fillText(line, PAD_X, startY + li * lineH));
+    const startY = y + h / 2 - ((lines.length - 1) * LABEL_LINE_H) / 2;
+    lines.forEach((line, li) => ctx.fillText(line, PAD_X, startY + li * LABEL_LINE_H));
 
     if (!isSection) {
-      ctx.font = isHighlight ? 'bold 13px "Malgun Gothic", sans-serif' : '13px "Malgun Gothic", sans-serif';
+      ctx.font = isHighlight ? FONT_VALUE_BOLD : FONT_VALUE;
       ctx.fillStyle = isHighlight ? COLORS.accent : COLORS.text;
       ctx.textAlign = 'center';
       row.values.forEach((v, i) => {

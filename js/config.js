@@ -1,14 +1,12 @@
+// 앱 전체(통계/경기추가/경기목록/추천/공유 등)에서 공통으로 쓰는 표시 순서:
+// 김현민-김민기-박종화.
 const PLAYERS = [
-  { id: 'park', name: '박프로장난아' },
   { id: 'kim_hm', name: '이기적비거리' },
   { id: 'kim_mk', name: 'kyotokim' },
+  { id: 'park', name: '박프로장난아' },
 ];
 
 const PLAYER_IDS = PLAYERS.map((p) => p.id);
-
-// Column order for the 통계 screen / share image only (data entry, the game
-// list, etc. keep PLAYER_IDS order).
-const STATS_DISPLAY_ORDER = ['kim_hm', 'kim_mk', 'park'];
 
 // Local-only display-name overrides (e.g. real names instead of nicknames).
 // Never hardcoded here — only ever set at runtime from a setting stored in
