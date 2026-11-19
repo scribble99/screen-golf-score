@@ -16,6 +16,8 @@ const DEFAULT_MONEY_ADJUSTMENT = { park: 0, kim_hm: 0, kim_mk: 0 };
 
 const LEAGUE_TITLE = 'KISTEP 위례 스크린 챔피언스 리그';
 
+const DEFAULT_PAR = 72;
+
 const HANDICAP_WINDOW = 10;
 const TRIM_PERCENT = 0.2;
 const RANK_MONEY = { 1: 5000, 1.5: 2500, 2: 0, 2.5: -2500, 3: -5000 };
