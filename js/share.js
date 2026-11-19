@@ -186,13 +186,12 @@ function measureColW(ctx, rows, names) {
   return maxW + PAD_X * 2;
 }
 
-async function buildShareImageCanvas(result) {
+async function buildShareImageCanvas(result, scale = 3) {
   const { names, rows } = buildRows(result);
   // Higher = sharper text in the exported PNG. Kept as a whole number so
   // every CSS-unit coordinate below lands on an exact device pixel instead
   // of a fractional one (which forces anti-aliasing blur on an otherwise
   // crisp glyph).
-  const scale = 3;
 
   const measureCanvas = document.createElement('canvas');
   const mctx = measureCanvas.getContext('2d');
@@ -271,8 +270,21 @@ async function buildShareImageCanvas(result) {
   return canvas;
 }
 
-async function canvasToBlob(canvas) {
-  return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+// On some phones, encoding a very large canvas silently fails — the
+// toBlob callback just never fires (no error, nothing) instead of throwing.
+// A timeout turns that into a real, catchable failure.
+async function canvasToBlob(canvas, timeoutMs = 12000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error('이미지 생성 시간이 초과되었습니다.')),
+      timeoutMs
+    );
+    canvas.toBlob((blob) => {
+      clearTimeout(timer);
+      if (blob) resolve(blob);
+      else reject(new Error('이미지를 생성하지 못했습니다.'));
+    }, 'image/png');
+  });
 }
 
 function shareImageFileName() {
@@ -288,9 +300,24 @@ function downloadBlob(blob, fileName) {
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
+// Tries the full-resolution render first; if the canvas is too large for
+// the device's available memory (common on budget phones), retries smaller
+// instead of leaving the user with a silently-stuck button.
+async function buildResultBlob(result) {
+  let lastErr;
+  for (const scale of [3, 2, 1.5]) {
+    try {
+      const canvas = await buildShareImageCanvas(result, scale);
+      return await canvasToBlob(canvas);
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('이미지를 생성하지 못했습니다.');
+}
+
 async function shareResults(result) {
-  const canvas = await buildShareImageCanvas(result);
-  const blob = await canvasToBlob(canvas);
+  const blob = await buildResultBlob(result);
   const fileName = shareImageFileName();
   const file = new File([blob], fileName, { type: 'image/png' });
 
@@ -306,7 +333,6 @@ async function shareResults(result) {
 // sheet — useful because apps like KakaoTalk re-compress photos sent via
 // share/attach-as-photo, but not a file attached from a saved image.
 async function saveResultsImage(result) {
-  const canvas = await buildShareImageCanvas(result);
-  const blob = await canvasToBlob(canvas);
+  const blob = await buildResultBlob(result);
   downloadBlob(blob, shareImageFileName());
 }

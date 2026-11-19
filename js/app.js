@@ -241,21 +241,36 @@ function wireOcr() {
 
   document.getElementById('saveImageBtn').addEventListener('click', async () => {
     if (!lastResult) return;
+    const btn = document.getElementById('saveImageBtn');
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '이미지 생성 중...';
     try {
       await saveResultsImage(lastResult);
+      alert('이미지가 저장되었습니다. (갤러리 또는 다운로드 폴더 확인)');
     } catch (err) {
       console.error(err);
       alert('이미지 저장에 실패했습니다: ' + err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
     }
   });
 
   document.getElementById('shareBtn').addEventListener('click', async () => {
     if (!lastResult) return;
+    const btn = document.getElementById('shareBtn');
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '이미지 생성 중...';
     try {
       await shareResults(lastResult);
     } catch (err) {
       console.error(err);
       alert('공유에 실패했습니다: ' + err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
     }
   });
 }

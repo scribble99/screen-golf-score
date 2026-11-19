@@ -129,7 +129,11 @@ input[type='number'] {
 }
 
 #saveImageBtn {
-  margin-bottom: 16px;
+  margin-bottom: 20px;
+}
+
+#statsContainer {
+  margin-top: 4px;
 }
 
 table {
