@@ -166,7 +166,7 @@ function computeStats(games) {
 }
 
 // Every unique pair of players, with the absolute gap between their current
-// handicaps (e.g. "박종화-김현민" → |12.3 − (−9.0)| = 21.3).
+// handicaps (e.g. "박프로장난아-이기적비거리" → |12.3 − (−9.0)| = 21.3).
 function computeHandicapGaps(stats) {
   const pairs = [];
   for (let i = 0; i < PLAYER_IDS.length; i++) {
