@@ -239,6 +239,16 @@ function wireOcr() {
     if (file) await runOcrAndFill(file);
   });
 
+  document.getElementById('saveImageBtn').addEventListener('click', async () => {
+    if (!lastResult) return;
+    try {
+      await saveResultsImage(lastResult);
+    } catch (err) {
+      console.error(err);
+      alert('이미지 저장에 실패했습니다: ' + err.message);
+    }
+  });
+
   document.getElementById('shareBtn').addEventListener('click', async () => {
     if (!lastResult) return;
     try {

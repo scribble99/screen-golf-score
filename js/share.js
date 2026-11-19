@@ -275,10 +275,23 @@ async function canvasToBlob(canvas) {
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
 }
 
+function shareImageFileName() {
+  return `golf-score-${new Date().toISOString().slice(0, 10)}.png`;
+}
+
+function downloadBlob(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
 async function shareResults(result) {
   const canvas = await buildShareImageCanvas(result);
   const blob = await canvasToBlob(canvas);
-  const fileName = `golf-score-${new Date().toISOString().slice(0, 10)}.png`;
+  const fileName = shareImageFileName();
   const file = new File([blob], fileName, { type: 'image/png' });
 
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -286,10 +299,14 @@ async function shareResults(result) {
     return;
   }
 
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = fileName;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  downloadBlob(blob, fileName);
+}
+
+// Saves the image straight to the device instead of going through the share
+// sheet — useful because apps like KakaoTalk re-compress photos sent via
+// share/attach-as-photo, but not a file attached from a saved image.
+async function saveResultsImage(result) {
+  const canvas = await buildShareImageCanvas(result);
+  const blob = await canvasToBlob(canvas);
+  downloadBlob(blob, shareImageFileName());
 }
