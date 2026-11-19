@@ -1,7 +1,7 @@
 const PLAYERS = [
-  { id: 'park', name: '박종화', nicknames: ['박프로장난아'] },
-  { id: 'kim_hm', name: '김현민', nicknames: ['이기적비거리'] },
-  { id: 'kim_mk', name: '김민기', nicknames: ['kyotokim'] },
+  { id: 'park', name: '박프로장난아' },
+  { id: 'kim_hm', name: '이기적비거리' },
+  { id: 'kim_mk', name: 'kyotokim' },
 ];
 
 const PLAYER_IDS = PLAYERS.map((p) => p.id);
@@ -11,9 +11,8 @@ function playerName(id) {
   return p ? p.name : id;
 }
 
-// 과거 엑셀 운영 기간 중 공식 집계 방식이 일부 바뀐 적이 있어, 그 시기의 손익을
-// 현재 엑셀 최종 값과 정확히 맞추기 위한 보정값. (정상 운영 시에는 수정할 필요 없음)
-const DEFAULT_MONEY_ADJUSTMENT = { park: 2500, kim_hm: -7000, kim_mk: 4500 };
+// 과거 기록을 가져오기(설정 탭)로 불러오면 이 값은 백업 파일 안의 조정값으로 대체됩니다.
+const DEFAULT_MONEY_ADJUSTMENT = { park: 0, kim_hm: 0, kim_mk: 0 };
 
 const LEAGUE_TITLE = 'KISTEP 위례 스크린 챔피언스 리그';
 

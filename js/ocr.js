@@ -41,15 +41,12 @@ function extractDate(text) {
 function extractScores(text) {
   const scores = {};
   for (const player of PLAYERS) {
-    for (const nickname of [player.name, ...player.nicknames]) {
-      const idx = text.indexOf(nickname);
-      if (idx === -1) continue;
-      const nearby = text.slice(idx, idx + nickname.length + 60);
-      const m = nearby.match(/\(\s*([+-]?\d+)\s*\)/);
-      if (m) {
-        scores[player.id] = parseInt(m[1], 10);
-        break;
-      }
+    const idx = text.indexOf(player.name);
+    if (idx === -1) continue;
+    const nearby = text.slice(idx, idx + player.name.length + 60);
+    const m = nearby.match(/\(\s*([+-]?\d+)\s*\)/);
+    if (m) {
+      scores[player.id] = parseInt(m[1], 10);
     }
   }
   return scores;
@@ -60,7 +57,7 @@ function extractCourse(lines) {
   for (const line of lines.slice(0, 6)) {
     if (junkPattern.test(line)) continue;
     if (line.length < 2) continue;
-    if (PLAYERS.some((p) => [p.name, ...p.nicknames].includes(line))) continue;
+    if (PLAYERS.some((p) => p.name === line)) continue;
     return line.replace(/[>›]+\s*$/, '').trim();
   }
   return null;
