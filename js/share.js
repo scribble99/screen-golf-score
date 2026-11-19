@@ -188,7 +188,11 @@ function measureColW(ctx, rows, names) {
 
 async function buildShareImageCanvas(result) {
   const { names, rows } = buildRows(result);
-  const scale = 2;
+  // Higher = sharper text in the exported PNG. Kept as a whole number so
+  // every CSS-unit coordinate below lands on an exact device pixel instead
+  // of a fractional one (which forces anti-aliasing blur on an otherwise
+  // crisp glyph).
+  const scale = 3;
 
   const measureCanvas = document.createElement('canvas');
   const mctx = measureCanvas.getContext('2d');
@@ -198,7 +202,7 @@ async function buildShareImageCanvas(result) {
   const titleH = 56 * FONT_SCALE * OTHER_FONT_MULT;
   const playerHeaderH = 36 * FONT_SCALE * OTHER_FONT_MULT;
 
-  const heights = rows.map((r) => rowHeight(mctx, r, colLabelW, width));
+  const heights = rows.map((r) => Math.round(rowHeight(mctx, r, colLabelW, width)));
   const totalHeight = titleH + playerHeaderH + heights.reduce((a, b) => a + b, 0) + 16 * FONT_SCALE;
 
   const canvas = document.createElement('canvas');
@@ -207,38 +211,41 @@ async function buildShareImageCanvas(result) {
   const ctx = canvas.getContext('2d');
   ctx.scale(scale, scale);
 
+  const widthR = Math.round(width);
   ctx.fillStyle = COLORS.bg;
-  ctx.fillRect(0, 0, width, totalHeight);
+  ctx.fillRect(0, 0, widthR, Math.round(totalHeight));
 
+  const titleHR = Math.round(titleH);
   ctx.fillStyle = COLORS.headerBg;
-  ctx.fillRect(0, 0, width, titleH);
+  ctx.fillRect(0, 0, widthR, titleHR);
   ctx.fillStyle = COLORS.headerText;
   ctx.font = FONT_TITLE;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(LEAGUE_TITLE, width / 2, titleH / 2);
+  ctx.fillText(LEAGUE_TITLE, Math.round(width / 2), Math.round(titleH / 2));
 
-  let y = titleH;
+  let y = titleHR;
+  const playerHeaderHR = Math.round(playerHeaderH);
   ctx.fillStyle = COLORS.sectionBg;
-  ctx.fillRect(0, y, width, playerHeaderH);
+  ctx.fillRect(0, y, widthR, playerHeaderHR);
   ctx.strokeStyle = COLORS.border;
-  ctx.strokeRect(0, y, width, playerHeaderH);
+  ctx.strokeRect(0, y, widthR, playerHeaderHR);
   ctx.fillStyle = COLORS.text;
   ctx.font = FONT_PLAYER_HEADER;
   names.forEach((name, i) => {
     const x = colLabelW + colW * i + colW / 2;
-    ctx.fillText(name, x, y + playerHeaderH / 2);
+    ctx.fillText(name, Math.round(x), Math.round(y + playerHeaderH / 2));
   });
-  y += playerHeaderH;
+  y += playerHeaderHR;
 
   rows.forEach((row, idx) => {
-    const h = heights[idx];
+    const h = Math.round(heights[idx]);
     const isSection = row.type === 'section';
     const isHighlight = row.type === 'highlight';
     ctx.fillStyle = isSection || isHighlight ? COLORS.sectionBg : idx % 2 === 0 ? COLORS.bg : COLORS.altRow;
-    ctx.fillRect(0, y, width, h);
+    ctx.fillRect(0, y, widthR, h);
     ctx.strokeStyle = COLORS.border;
-    ctx.strokeRect(0, y, width, h);
+    ctx.strokeRect(0, y, widthR, h);
 
     ctx.fillStyle = isSection || isHighlight ? COLORS.accent : COLORS.text;
     ctx.font = isSection || isHighlight ? FONT_LABEL_BOLD : FONT_LABEL;
@@ -246,7 +253,7 @@ async function buildShareImageCanvas(result) {
     const wrapWidth = isSection ? width - PAD_X * 2 : colLabelW - PAD_X * 2;
     const lines = wrapLabel(ctx, row.label, wrapWidth);
     const startY = y + h / 2 - ((lines.length - 1) * LABEL_LINE_H) / 2;
-    lines.forEach((line, li) => ctx.fillText(line, PAD_X, startY + li * LABEL_LINE_H));
+    lines.forEach((line, li) => ctx.fillText(line, Math.round(PAD_X), Math.round(startY + li * LABEL_LINE_H)));
 
     if (!isSection) {
       ctx.font = isHighlight ? FONT_HANDICAP_VALUE : FONT_VALUE;
@@ -254,7 +261,7 @@ async function buildShareImageCanvas(result) {
       ctx.textAlign = 'center';
       row.values.forEach((v, i) => {
         const x = colLabelW + colW * i + colW / 2;
-        ctx.fillText(String(v), x, y + h / 2);
+        ctx.fillText(String(v), Math.round(x), Math.round(y + h / 2));
       });
     }
 
