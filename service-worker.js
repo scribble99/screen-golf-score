@@ -1,4 +1,4 @@
-const CACHE_NAME = 'golf-score-cache-v7';
+const CACHE_NAME = 'golf-score-cache-v8';
 const ASSETS = [
   './',
   './index.html',
@@ -18,7 +18,12 @@ importScripts('js/db.js');
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
+    caches
+      .open(CACHE_NAME)
+      // {cache: 'reload'} bypasses the browser's own HTTP cache too, not
+      // just ours — without it, a stale network response can get baked
+      // into the (freshly-versioned) SW cache again.
+      .then((cache) => Promise.all(ASSETS.map((url) => fetch(url, { cache: 'reload' }).then((res) => cache.put(url, res)))))
   );
   self.skipWaiting();
 });
@@ -32,6 +37,9 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// Network-first: while developing/iterating, a stale cached copy silently
+// winning over a fresh deploy is much more confusing than the small cost of
+// hitting the network on every load. Falls back to cache only when offline.
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
@@ -40,8 +48,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  if (event.request.method !== 'GET') return;
+
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request))
+    fetch(event.request)
+      .then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        return res;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
 
