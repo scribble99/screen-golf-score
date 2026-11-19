@@ -24,7 +24,7 @@ const COLORS = {
 // producing a taller, narrower image, which is expected/fine.
 const FONT_SCALE = 2.2;
 const WIDTH_SCALE = 1.25;
-const COL_LABEL_W = 170 * WIDTH_SCALE;
+const MIN_COL_LABEL_W = 170 * WIDTH_SCALE;
 const ROW_H = 30 * FONT_SCALE;
 const PAD_X = 12 * WIDTH_SCALE;
 const LABEL_LINE_H = 18 * FONT_SCALE;
@@ -35,6 +35,9 @@ const FONT_LABEL = `${Math.round(13 * FONT_SCALE)}px "Malgun Gothic", sans-serif
 const FONT_LABEL_BOLD = `bold ${Math.round(12 * FONT_SCALE)}px "Malgun Gothic", sans-serif`;
 const FONT_VALUE = `${Math.round(13 * FONT_SCALE)}px "Malgun Gothic", sans-serif`;
 const FONT_VALUE_BOLD = `bold ${Math.round(13 * FONT_SCALE)}px "Malgun Gothic", sans-serif`;
+// The handicap row's numbers are the headline stat — 3x the size of the
+// (already 2.2x-scaled) other values.
+const FONT_HANDICAP_VALUE = `bold ${Math.round(13 * FONT_SCALE * 3)}px "Malgun Gothic", sans-serif`;
 
 function fmtNum(v, digits = 0) {
   if (v === null || v === undefined || Number.isNaN(v)) return '-';
@@ -127,23 +130,63 @@ function wrapLabel(ctx, label, maxWidth) {
   return lines;
 }
 
-function rowHeight(ctx, row) {
-  const labelLines = wrapLabel(ctx, row.label, COL_LABEL_W - PAD_X * 2);
-  return Math.max(ROW_H, labelLines.length * LABEL_LINE_H + 12 * FONT_SCALE);
+// Section rows have no value columns, so their label can use the full
+// image width; data/highlight rows share the row with 3 value columns, so
+// their label is constrained to the (dynamically sized) label column.
+function rowHeight(ctx, row, colLabelW, width) {
+  const wrapWidth = row.type === 'section' ? width - PAD_X * 2 : colLabelW - PAD_X * 2;
+  const labelLines = wrapLabel(ctx, row.label, wrapWidth);
+  let h = Math.max(ROW_H, labelLines.length * LABEL_LINE_H + 12 * FONT_SCALE);
+  if (row.type === 'highlight') {
+    ctx.font = FONT_HANDICAP_VALUE;
+    const metrics = ctx.measureText('0');
+    const valueH = (metrics.actualBoundingBoxAscent || 0) + (metrics.actualBoundingBoxDescent || 0);
+    h = Math.max(h, valueH + 16 * FONT_SCALE);
+  }
+  return h;
+}
+
+// Labels are only ever split onto a second line deliberately (an explicit
+// "\n" in the text) — never because the column was too narrow for a single
+// line. So the label column width is measured from the longest actual
+// label line (across data/highlight rows) rather than guessed.
+function measureColLabelW(ctx, rows) {
+  ctx.font = FONT_LABEL;
+  let maxW = 0;
+  rows.forEach((row) => {
+    if (row.type === 'section') return;
+    row.label.split('\n').forEach((line) => {
+      maxW = Math.max(maxW, ctx.measureText(line).width);
+    });
+  });
+  return Math.max(MIN_COL_LABEL_W, maxW + PAD_X * 2);
+}
+
+// The handicap row's values use a much bigger font than every other value
+// cell, so the data columns need to be at least wide enough for those
+// specific strings (e.g. "+13.8") — otherwise they'd clip at the huge size.
+function measureColW(ctx, rows) {
+  const minColW = 150 * WIDTH_SCALE;
+  const highlightRow = rows.find((r) => r.type === 'highlight');
+  if (!highlightRow) return minColW;
+  ctx.font = FONT_HANDICAP_VALUE;
+  const widest = Math.max(...highlightRow.values.map((v) => ctx.measureText(String(v)).width));
+  return Math.max(minColW, widest + PAD_X * 2);
 }
 
 async function buildShareImageCanvas(result) {
   const { names, rows } = buildRows(result);
   const scale = 2;
-  const colW = 150 * WIDTH_SCALE;
-  const width = COL_LABEL_W + colW * 3;
-  const titleH = 56 * FONT_SCALE;
-  const playerHeaderH = 36 * FONT_SCALE;
 
   const measureCanvas = document.createElement('canvas');
   const mctx = measureCanvas.getContext('2d');
-  mctx.font = FONT_LABEL;
-  const heights = rows.map((r) => rowHeight(mctx, r));
+  const colW = measureColW(mctx, rows);
+  const colLabelW = measureColLabelW(mctx, rows);
+  const width = colLabelW + colW * 3;
+  const titleH = 56 * FONT_SCALE;
+  const playerHeaderH = 36 * FONT_SCALE;
+
+  const heights = rows.map((r) => rowHeight(mctx, r, colLabelW, width));
   const totalHeight = titleH + playerHeaderH + heights.reduce((a, b) => a + b, 0) + 16 * FONT_SCALE;
 
   const canvas = document.createElement('canvas');
@@ -171,7 +214,7 @@ async function buildShareImageCanvas(result) {
   ctx.fillStyle = COLORS.text;
   ctx.font = FONT_PLAYER_HEADER;
   names.forEach((name, i) => {
-    const x = COL_LABEL_W + colW * i + colW / 2;
+    const x = colLabelW + colW * i + colW / 2;
     ctx.fillText(name, x, y + playerHeaderH / 2);
   });
   y += playerHeaderH;
@@ -188,16 +231,17 @@ async function buildShareImageCanvas(result) {
     ctx.fillStyle = isSection || isHighlight ? COLORS.accent : COLORS.text;
     ctx.font = isSection || isHighlight ? FONT_LABEL_BOLD : FONT_LABEL;
     ctx.textAlign = 'left';
-    const lines = wrapLabel(ctx, row.label, COL_LABEL_W - PAD_X * 2);
+    const wrapWidth = isSection ? width - PAD_X * 2 : colLabelW - PAD_X * 2;
+    const lines = wrapLabel(ctx, row.label, wrapWidth);
     const startY = y + h / 2 - ((lines.length - 1) * LABEL_LINE_H) / 2;
     lines.forEach((line, li) => ctx.fillText(line, PAD_X, startY + li * LABEL_LINE_H));
 
     if (!isSection) {
-      ctx.font = isHighlight ? FONT_VALUE_BOLD : FONT_VALUE;
+      ctx.font = isHighlight ? FONT_HANDICAP_VALUE : FONT_VALUE;
       ctx.fillStyle = isHighlight ? COLORS.accent : COLORS.text;
       ctx.textAlign = 'center';
       row.values.forEach((v, i) => {
-        const x = COL_LABEL_W + colW * i + colW / 2;
+        const x = colLabelW + colW * i + colW / 2;
         ctx.fillText(String(v), x, y + h / 2);
       });
     }
