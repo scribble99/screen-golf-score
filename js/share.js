@@ -23,20 +23,24 @@ const COLORS = {
 // grows is what actually makes the text take up more of the image —
 // producing a taller, narrower image, which is expected/fine.
 const FONT_SCALE = 2.2;
+// Every font except the handicap number got doubled again on top of
+// FONT_SCALE (the handicap number stays at FONT_SCALE*3, unchanged, and
+// stays the biggest thing on the image).
+const OTHER_FONT_MULT = 2;
 const WIDTH_SCALE = 1.25;
 const MIN_COL_LABEL_W = 170 * WIDTH_SCALE;
-const ROW_H = 30 * FONT_SCALE;
+const ROW_H = 30 * FONT_SCALE * OTHER_FONT_MULT;
 const PAD_X = 12 * WIDTH_SCALE;
-const LABEL_LINE_H = 18 * FONT_SCALE;
-const VALUE_LINE_H = 16 * FONT_SCALE;
-const FONT_TITLE = `bold ${Math.round(18 * FONT_SCALE)}px "Malgun Gothic", sans-serif`;
-const FONT_PLAYER_HEADER = `bold ${Math.round(14 * FONT_SCALE)}px "Malgun Gothic", sans-serif`;
-const FONT_LABEL = `${Math.round(13 * FONT_SCALE)}px "Malgun Gothic", sans-serif`;
-const FONT_LABEL_BOLD = `bold ${Math.round(12 * FONT_SCALE)}px "Malgun Gothic", sans-serif`;
-const FONT_VALUE = `${Math.round(13 * FONT_SCALE)}px "Malgun Gothic", sans-serif`;
-const FONT_VALUE_BOLD = `bold ${Math.round(13 * FONT_SCALE)}px "Malgun Gothic", sans-serif`;
-// The handicap row's numbers are the headline stat — 3x the size of the
-// (already 2.2x-scaled) other values.
+const LABEL_LINE_H = 18 * FONT_SCALE * OTHER_FONT_MULT;
+const VALUE_LINE_H = 16 * FONT_SCALE * OTHER_FONT_MULT;
+const FONT_TITLE = `bold ${Math.round(18 * FONT_SCALE * OTHER_FONT_MULT)}px "Malgun Gothic", sans-serif`;
+const FONT_PLAYER_HEADER = `bold ${Math.round(14 * FONT_SCALE * OTHER_FONT_MULT)}px "Malgun Gothic", sans-serif`;
+const FONT_LABEL = `${Math.round(13 * FONT_SCALE * OTHER_FONT_MULT)}px "Malgun Gothic", sans-serif`;
+const FONT_LABEL_BOLD = `bold ${Math.round(12 * FONT_SCALE * OTHER_FONT_MULT)}px "Malgun Gothic", sans-serif`;
+const FONT_VALUE = `${Math.round(13 * FONT_SCALE * OTHER_FONT_MULT)}px "Malgun Gothic", sans-serif`;
+const FONT_VALUE_BOLD = `bold ${Math.round(13 * FONT_SCALE * OTHER_FONT_MULT)}px "Malgun Gothic", sans-serif`;
+// The handicap row's numbers are the headline stat — kept at 3x the
+// *original* (pre-doubling) value size, so they stay the biggest element.
 const FONT_HANDICAP_VALUE = `bold ${Math.round(13 * FONT_SCALE * 3)}px "Malgun Gothic", sans-serif`;
 
 function fmtNum(v, digits = 0) {
@@ -162,16 +166,24 @@ function measureColLabelW(ctx, rows) {
   return Math.max(MIN_COL_LABEL_W, maxW + PAD_X * 2);
 }
 
-// The handicap row's values use a much bigger font than every other value
-// cell, so the data columns need to be at least wide enough for those
-// specific strings (e.g. "+13.8") — otherwise they'd clip at the huge size.
-function measureColW(ctx, rows) {
-  const minColW = 150 * WIDTH_SCALE;
-  const highlightRow = rows.find((r) => r.type === 'highlight');
-  if (!highlightRow) return minColW;
-  ctx.font = FONT_HANDICAP_VALUE;
-  const widest = Math.max(...highlightRow.values.map((v) => ctx.measureText(String(v)).width));
-  return Math.max(minColW, widest + PAD_X * 2);
+// Data columns need to fit the widest thing that will actually be drawn in
+// them — the player name headers (e.g. "이기적비거리") as well as values
+// (e.g. "-12,500", "+21(3)", or the extra-large handicap numbers) —
+// measured rather than guessed, same reasoning as measureColLabelW.
+function measureColW(ctx, rows, names) {
+  let maxW = 150 * WIDTH_SCALE;
+  ctx.font = FONT_PLAYER_HEADER;
+  names.forEach((name) => {
+    maxW = Math.max(maxW, ctx.measureText(name).width);
+  });
+  rows.forEach((row) => {
+    if (row.type === 'section') return;
+    ctx.font = row.type === 'highlight' ? FONT_HANDICAP_VALUE : FONT_VALUE;
+    row.values.forEach((v) => {
+      maxW = Math.max(maxW, ctx.measureText(String(v)).width);
+    });
+  });
+  return maxW + PAD_X * 2;
 }
 
 async function buildShareImageCanvas(result) {
@@ -180,11 +192,11 @@ async function buildShareImageCanvas(result) {
 
   const measureCanvas = document.createElement('canvas');
   const mctx = measureCanvas.getContext('2d');
-  const colW = measureColW(mctx, rows);
+  const colW = measureColW(mctx, rows, names);
   const colLabelW = measureColLabelW(mctx, rows);
   const width = colLabelW + colW * 3;
-  const titleH = 56 * FONT_SCALE;
-  const playerHeaderH = 36 * FONT_SCALE;
+  const titleH = 56 * FONT_SCALE * OTHER_FONT_MULT;
+  const playerHeaderH = 36 * FONT_SCALE * OTHER_FONT_MULT;
 
   const heights = rows.map((r) => rowHeight(mctx, r, colLabelW, width));
   const totalHeight = titleH + playerHeaderH + heights.reduce((a, b) => a + b, 0) + 16 * FONT_SCALE;
