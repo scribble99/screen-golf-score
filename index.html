@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>스크린골프 스코어 관리</title>
+  <meta name="theme-color" content="#1b5e3a">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header>
+    <h1>스크린골프 스코어 관리</h1>
+  </header>
+
+  <nav id="tabs">
+    <button class="tab-btn active" data-tab="stats">통계</button>
+    <button class="tab-btn" data-tab="add">경기 추가</button>
+    <button class="tab-btn" data-tab="list">경기 목록</button>
+    <button class="tab-btn" data-tab="settings">설정</button>
+  </nav>
+
+  <main id="app">
+    <section id="tab-stats" class="tab-panel active">
+      <button id="shareBtn" class="primary-btn">공유하기</button>
+      <div id="statsContainer">불러오는 중...</div>
+    </section>
+
+    <section id="tab-add" class="tab-panel">
+      <div class="card">
+        <h2>사진으로 가져오기</h2>
+        <p class="hint">골프존 결과 화면을 캡쳐한 사진을 선택하면 날짜/점수를 자동으로 읽어 아래 입력폼을 채워줍니다. 인식된 값은 반드시 확인 후 저장하세요.</p>
+        <input type="file" id="ocrFileInput" accept="image/*">
+        <div id="ocrStatus"></div>
+      </div>
+
+      <form id="gameForm" class="card">
+        <h2>경기 입력</h2>
+        <label>날짜
+          <input type="date" id="f_date" required>
+        </label>
+        <label>구장
+          <input type="text" id="f_course" list="courseList" placeholder="예: 지산 동/남" required>
+          <datalist id="courseList"></datalist>
+        </label>
+        <div class="score-grid" id="scoreInputs"></div>
+        <input type="hidden" id="f_editId">
+        <button type="submit" class="primary-btn">저장</button>
+        <button type="button" id="cancelEditBtn" class="ghost-btn" style="display:none;">수정 취소</button>
+      </form>
+    </section>
+
+    <section id="tab-list" class="tab-panel">
+      <div id="gameListContainer">불러오는 중...</div>
+    </section>
+
+    <section id="tab-settings" class="tab-panel">
+      <div class="card">
+        <h2>손익 초기 조정금액(원)</h2>
+        <p class="hint">과거 정산 내역 등 수식으로 설명되지 않는 수동 보정값입니다. 평소엔 건드릴 필요 없습니다.</p>
+        <div id="adjustmentInputs"></div>
+        <button id="saveAdjustmentBtn" class="primary-btn">저장</button>
+      </div>
+      <div class="card">
+        <h2>데이터 백업</h2>
+        <button id="exportBtn" class="ghost-btn">내보내기(JSON 다운로드)</button>
+        <input type="file" id="importFileInput" accept="application/json" style="display:none;">
+        <button id="importBtn" class="ghost-btn">가져오기(JSON 파일)</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/seed-data.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/calc.js"></script>
+  <script src="js/ocr.js"></script>
+  <script src="js/share.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('service-worker.js');
+    }
+  </script>
+</body>
+</html>
