@@ -25,7 +25,7 @@ async function recognizeGolfZoneCapture(imageSource, onProgress) {
     rawText: text,
     date: extractDate(text),
     course: extractCourse(lines),
-    scores: extractScores(text),
+    scores: extractScores(lines),
   };
 }
 
@@ -38,21 +38,51 @@ function extractDate(text) {
   return `${year}-${pad(mm)}-${pad(dd)}`;
 }
 
-function extractScores(text) {
+// The GolfZone screen lays the three players out vertically (one "featured"
+// player with a large stylised score, two collapsed rows below with plain
+// text "닉네임 ... 숫자 (±N)"). The collapsed rows' nickname and score are on
+// the exact same OCR line, so matching line-by-line is far more reliable
+// than distance-in-flattened-text (right-padded whitespace before the score
+// can put the *next* player's nickname closer than the correct one). The
+// featured player's block is OCR'd far worse (large colored badge font), so
+// as a fallback we assign any leftover "(±N)" line, in on-screen order, to
+// whichever player's nickname couldn't be matched directly.
+function extractScores(lines) {
+  const parenRe = /\(\s*([+-]?\d+)\s*\)/;
   const scores = {};
-  for (const player of PLAYERS) {
-    const idx = text.indexOf(player.name);
-    if (idx === -1) continue;
-    const nearby = text.slice(idx, idx + player.name.length + 60);
-    const m = nearby.match(/\(\s*([+-]?\d+)\s*\)/);
+  const usedLines = new Set();
+
+  PLAYERS.forEach((player) => {
+    const lineIdx = lines.findIndex((line, i) => !usedLines.has(i) && line.includes(player.name));
+    if (lineIdx === -1) return;
+    const m = lines[lineIdx].match(parenRe);
     if (m) {
       scores[player.id] = parseInt(m[1], 10);
+      usedLines.add(lineIdx);
     }
-  }
+  });
+
+  const leftoverPlayers = PLAYERS.map((p) => p.id).filter((id) => scores[id] === undefined);
+  const leftoverParenLines = lines
+    .map((line, i) => ({ line, i }))
+    .filter(({ line, i }) => !usedLines.has(i) && parenRe.test(line));
+  leftoverPlayers.forEach((pid, i) => {
+    const entry = leftoverParenLines[i];
+    if (entry) scores[pid] = parseInt(entry.line.match(parenRe)[1], 10);
+  });
+
   return scores;
 }
 
+// The course name has no fixed marker of its own, but it always sits right
+// above the "코스X.X 그린X.X ..." stat line, which OCRs far more reliably
+// (plain small text, no icons/photos overlapping it).
 function extractCourse(lines) {
+  const statLineIdx = lines.findIndex((l) => /(코스|그린)\s*[\d.]/.test(l));
+  if (statLineIdx > 0) {
+    return lines[statLineIdx - 1].replace(/[>›]+\s*$/, '').trim();
+  }
+
   const junkPattern = /^[\d:%.\s]*$/;
   for (const line of lines.slice(0, 6)) {
     if (junkPattern.test(line)) continue;
