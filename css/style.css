@@ -24,6 +24,7 @@ header h1 {
 
 #tabs {
   display: flex;
+  overflow-x: auto;
   background: #fff;
   border-bottom: 1px solid #d6dcdc;
   position: sticky;
@@ -32,11 +33,12 @@ header h1 {
 }
 
 .tab-btn {
-  flex: 1;
-  padding: 12px 4px;
+  flex: 1 0 auto;
+  padding: 12px 10px;
   border: none;
   background: none;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
   color: #55615f;
   border-bottom: 3px solid transparent;
 }

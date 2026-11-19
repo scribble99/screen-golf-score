@@ -3,6 +3,9 @@ let lastResult = null;
 
 async function init() {
   await GolfDB.seedIfEmpty(SEED_GAMES);
+  const displayNames = await GolfDB.getSetting('displayNames', {});
+  setPlayerDisplayNames(displayNames);
+
   await reloadGames();
   buildScoreInputs();
   wireTabs();
@@ -14,10 +17,12 @@ async function init() {
 
 async function reloadGames() {
   allGames = await GolfDB.getAllGames();
-  lastResult = await computeStats(allGames);
+  lastResult = computeStats(allGames);
   renderStats(lastResult);
   renderCourseList();
   renderGameList();
+  renderGap(lastResult);
+  renderRecommend(lastResult);
 }
 
 function wireTabs() {
@@ -40,7 +45,7 @@ function buildScoreInputs() {
   container.innerHTML = '';
   PLAYERS.forEach((p) => {
     const wrap = document.createElement('label');
-    wrap.textContent = `${p.name} 스코어(파 대비)`;
+    wrap.textContent = `${playerName(p.id)} 스코어(파 대비)`;
     const input = document.createElement('input');
     input.type = 'number';
     input.id = `score_${p.id}`;
@@ -89,11 +94,11 @@ function renderGameList() {
     return;
   }
   const sorted = [...allGames].sort((a, b) => (a.date < b.date ? 1 : -1));
-  let html = '<table class="list-table"><thead><tr><th>날짜</th><th>구장</th>';
-  PLAYERS.forEach((p) => (html += `<th>${p.name}</th>`));
+  let html = '<table class="list-table"><thead><tr><th>날짜</th><th>구장</th><th>전장(m)</th>';
+  PLAYERS.forEach((p) => (html += `<th>${playerName(p.id)}</th>`));
   html += '<th></th></tr></thead><tbody>';
   sorted.forEach((g) => {
-    html += `<tr><td>${g.date}</td><td>${g.course}</td>`;
+    html += `<tr><td>${g.date}</td><td>${g.course}</td><td>${g.yardage ? g.yardage.toLocaleString('ko-KR') : '-'}</td>`;
     PLAYERS.forEach((p) => (html += `<td>${fmtScore(g.scores[p.id])}</td>`));
     html += `<td class="row-actions">
       <button data-action="edit" data-id="${g.id}">수정</button>
@@ -111,12 +116,51 @@ function renderGameList() {
   });
 }
 
+function renderGap(result) {
+  const container = document.getElementById('gapContainer');
+  if (!result.totalGames) {
+    container.innerHTML = '<p>등록된 경기가 없습니다.</p>';
+    return;
+  }
+  const gaps = computeHandicapGaps(result.stats);
+  let html = '<table class="list-table"><thead><tr><th>대결</th><th>핸디 격차</th></tr></thead><tbody>';
+  gaps.forEach((g) => {
+    html += `<tr><td>${g.label}</td><td>${g.gap === null ? '-' : g.gap.toFixed(1)}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+function renderRecommend(result) {
+  const container = document.getElementById('recommendContainer');
+  if (!result.totalGames) {
+    container.innerHTML = '<p>등록된 경기가 없습니다.</p>';
+    return;
+  }
+  const recs = computeCourseRecommendations(result.timeline, 'park', 10);
+  if (!recs.length) {
+    container.innerHTML = '<p>박프로장난아가 핸디 대비 단독 1위를 기록한 경기가 아직 없습니다.</p>';
+    return;
+  }
+  let html = '<table class="list-table"><thead><tr><th>순위</th><th>날짜</th><th>구장</th><th>전장(m)</th>';
+  PLAYERS.forEach((p) => (html += `<th>${playerName(p.id)}</th>`));
+  html += '</tr></thead><tbody>';
+  recs.forEach((r, i) => {
+    html += `<tr><td>${i + 1}</td><td>${r.date}</td><td>${r.course}</td><td>${r.yardage ? r.yardage.toLocaleString('ko-KR') : '-'}</td>`;
+    PLAYERS.forEach((p) => (html += `<td>${fmtScore(r.scores[p.id])}</td>`));
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
 function startEditGame(id) {
   const game = allGames.find((g) => g.id === id);
   if (!game) return;
   document.getElementById('f_editId').value = id;
   document.getElementById('f_date').value = game.date;
   document.getElementById('f_course').value = game.course;
+  document.getElementById('f_yardage').value = game.yardage || '';
   PLAYERS.forEach((p) => (document.getElementById(`score_${p.id}`).value = game.scores[p.id]));
   document.getElementById('cancelEditBtn').style.display = '';
   switchTab('add');
@@ -137,9 +181,11 @@ function wireForm() {
     PLAYERS.forEach((p) => {
       scores[p.id] = parseInt(document.getElementById(`score_${p.id}`).value, 10);
     });
+    const yardageVal = document.getElementById('f_yardage').value;
     const game = {
       date: document.getElementById('f_date').value,
       course: document.getElementById('f_course').value.trim(),
+      yardage: yardageVal ? parseInt(yardageVal, 10) : null,
       scores,
     };
     if (id) {
@@ -189,6 +235,7 @@ async function runOcrAndFill(imageSource) {
     });
     if (parsed.date) document.getElementById('f_date').value = parsed.date;
     if (parsed.course) document.getElementById('f_course').value = parsed.course;
+    if (parsed.yardage) document.getElementById('f_yardage').value = parsed.yardage;
     PLAYERS.forEach((p) => {
       if (parsed.scores[p.id] !== undefined) {
         document.getElementById(`score_${p.id}`).value = parsed.scores[p.id];
@@ -210,35 +257,39 @@ async function consumePendingShare() {
 }
 
 function wireSettings() {
-  const container = document.getElementById('adjustmentInputs');
-  GolfDB.getSetting('moneyAdjustment', DEFAULT_MONEY_ADJUSTMENT).then((adj) => {
+  const container = document.getElementById('displayNameInputs');
+  GolfDB.getSetting('displayNames', {}).then((names) => {
     container.innerHTML = '';
     PLAYERS.forEach((p) => {
       const wrap = document.createElement('label');
-      wrap.textContent = p.name;
+      wrap.textContent = `${p.name} →`;
       const input = document.createElement('input');
-      input.type = 'number';
-      input.id = `adj_${p.id}`;
-      input.value = adj[p.id] ?? 0;
+      input.type = 'text';
+      input.id = `dispname_${p.id}`;
+      input.placeholder = p.name;
+      input.value = names[p.id] || '';
       wrap.appendChild(input);
       container.appendChild(wrap);
     });
   });
 
-  document.getElementById('saveAdjustmentBtn').addEventListener('click', async () => {
-    const adj = {};
+  document.getElementById('saveDisplayNamesBtn').addEventListener('click', async () => {
+    const names = {};
     PLAYERS.forEach((p) => {
-      adj[p.id] = parseInt(document.getElementById(`adj_${p.id}`).value, 10) || 0;
+      const v = document.getElementById(`dispname_${p.id}`).value.trim();
+      if (v) names[p.id] = v;
     });
-    await GolfDB.setSetting('moneyAdjustment', adj);
+    await GolfDB.setSetting('displayNames', names);
+    setPlayerDisplayNames(names);
+    buildScoreInputs();
     await reloadGames();
     alert('저장했습니다.');
   });
 
   document.getElementById('exportBtn').addEventListener('click', async () => {
     const games = await GolfDB.getAllGames();
-    const adjustment = await GolfDB.getSetting('moneyAdjustment', DEFAULT_MONEY_ADJUSTMENT);
-    const payload = JSON.stringify({ games, adjustment }, null, 2);
+    const displayNames = await GolfDB.getSetting('displayNames', {});
+    const payload = JSON.stringify({ games, displayNames }, null, 2);
     const blob = new Blob([payload], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -267,7 +318,10 @@ function wireSettings() {
       const { id, ...rest } = g;
       await GolfDB.addGame(rest);
     }
-    if (data.adjustment) await GolfDB.setSetting('moneyAdjustment', data.adjustment);
+    if (data.displayNames) {
+      await GolfDB.setSetting('displayNames', data.displayNames);
+      setPlayerDisplayNames(data.displayNames);
+    }
     e.target.value = '';
     await reloadGames();
     alert('가져오기를 완료했습니다.');

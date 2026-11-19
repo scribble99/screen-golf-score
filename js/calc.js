@@ -105,10 +105,9 @@ function bucketCounts(timeline, rankField) {
   return buckets;
 }
 
-async function computeStats(games) {
+function computeStats(games) {
   const ranked = games.filter((g) => !g.excluded);
   const timeline = computeTimeline(ranked);
-  const adjustments = (await GolfDB.getSetting('moneyAdjustment', null)) || DEFAULT_MONEY_ADJUSTMENT;
   const n = timeline.length;
 
   const rankBucketsHandicap = bucketCounts(timeline, 'rankAdj');
@@ -121,10 +120,12 @@ async function computeStats(games) {
     const last = timeline[n - 1];
     const prev = timeline[n - 2];
 
+    // 당일 핸디 대비 순위: 1위 +5,000원 / 2위 0원 / 3위 -5,000원.
+    // 동률(1.5, 2.5)은 인접한 두 금액의 평균으로 자연스럽게 보간된다.
     const money = [1, 1.5, 2.5, 3].reduce(
       (sum, r) => sum + rankBucketsHandicap[p][r] * RANK_MONEY[r],
       0
-    ) + (adjustments[p] || 0);
+    );
 
     const recentWindow = rawScores.slice(-HANDICAP_WINDOW);
     const trend = linearSlope(recentWindow);
@@ -162,4 +163,46 @@ async function computeStats(games) {
   const justDropped = timeline.length > HANDICAP_WINDOW ? timeline[timeline.length - HANDICAP_WINDOW - 1] : null;
 
   return { timeline, stats, recentGames, justDropped, totalGames: n };
+}
+
+// Every unique pair of players, with the absolute gap between their current
+// handicaps (e.g. "박종화-김현민" → |12.3 − (−9.0)| = 21.3).
+function computeHandicapGaps(stats) {
+  const pairs = [];
+  for (let i = 0; i < PLAYER_IDS.length; i++) {
+    for (let j = i + 1; j < PLAYER_IDS.length; j++) {
+      const a = PLAYER_IDS[i];
+      const b = PLAYER_IDS[j];
+      const ha = stats[a].handicap;
+      const hb = stats[b].handicap;
+      pairs.push({
+        a,
+        b,
+        label: `${playerName(a)}-${playerName(b)}`,
+        gap: ha !== null && hb !== null ? Math.abs(ha - hb) : null,
+      });
+    }
+  }
+  return pairs;
+}
+
+// Top games (by default up to 10) where `playerId` won solo first place by
+// handicap-adjusted score, ranked by how big a margin they won by — i.e.
+// how much lower their adjusted score was than the next-best opponent's.
+function computeCourseRecommendations(timeline, playerId, limit) {
+  const wins = [];
+  timeline.forEach((game) => {
+    if (game.rankAdj[playerId] !== 1) return;
+    const othersAdj = PLAYER_IDS.filter((p) => p !== playerId).map((p) => game.adjusted[p]);
+    const margin = Math.min(...othersAdj) - game.adjusted[playerId];
+    wins.push({
+      date: game.date,
+      course: game.course,
+      yardage: game.yardage ?? null,
+      scores: game.scores,
+      margin,
+    });
+  });
+  wins.sort((a, b) => b.margin - a.margin);
+  return wins.slice(0, limit || 10);
 }

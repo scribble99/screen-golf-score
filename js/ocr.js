@@ -2,6 +2,12 @@
    OCR is never 100% accurate, especially for Korean course names, so the
    caller must always show a confirm/edit form before saving. */
 
+// Matches obvious OCR junk in a course name: stray symbols (misread "CC"
+// etc.) or a lone Hangul *jamo* letter (ㄷ, ㅌ, ...) standing on its own —
+// real Korean text always uses composed syllable blocks, so an isolated
+// jamo character is reliably noise, never a legitimate part of a name.
+const JUNK_CHAR_RE = /[<>{}|~`]|[ㄱ-ㆎ]/;
+
 async function recognizeGolfZoneCapture(imageSource, onProgress) {
   if (typeof Tesseract === 'undefined') {
     throw new Error('OCR 라이브러리를 아직 불러오지 못했습니다. 인터넷 연결을 확인해주세요.');
@@ -10,7 +16,7 @@ async function recognizeGolfZoneCapture(imageSource, onProgress) {
 
   const mainWorker = await Tesseract.createWorker('kor+eng', 1, {
     logger: (m) => {
-      if (m.status === 'recognizing text') report(Math.round(m.progress * 60));
+      if (m.status === 'recognizing text') report(Math.round(m.progress * 70));
     },
   });
   let data;
@@ -22,38 +28,46 @@ async function recognizeGolfZoneCapture(imageSource, onProgress) {
 
   const text = data.text || '';
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
-  const ocrLines = groupWordsByLine(flattenWords(data.blocks));
 
   const scores = extractScores(lines);
   let course = extractCourse(lines);
+  const yardage = extractYardage(text);
+  const date = extractDate(text);
 
-  // The featured player's score and (occasionally) the course name are
-  // rendered in large/stylised fonts that the combined kor+eng model reads
-  // badly. Re-OCR just those small regions — located from the first pass's
-  // own word positions, not hardcoded coordinates — with an English-only
-  // model, which reads this UI's Latin digits/letters far more reliably.
-  const missingPlayers = PLAYERS.filter((p) => scores[p.id] === undefined);
-  const courseLooksGarbled = course && /[<>{}|~`]/.test(course);
+  // The featured player (the one with the big hole-by-hole table instead of
+  // a plain "닉네임 ... (±N)" row) never reliably shows "(±N)" on its own —
+  // the combined kor+eng model mangles that stylised badge differently on
+  // almost every screenshot (missing digits, "+" read as "1", everything
+  // fused into one blob, ...). Instead of trying to re-read that badge, we
+  // sum the hole table's own "Score" row totals (the plain number at the
+  // end of the row right after each "Par" row) for the front/back nine —
+  // that total is already the signed relative-to-par score, and this row
+  // reads far more reliably since it's plain monospace-style digits.
+  PLAYERS.forEach((player) => {
+    if (scores[player.id] !== undefined) return;
+    const fromHoleTable = extractFeaturedPlayerScore(lines);
+    if (fromHoleTable !== null) scores[player.id] = fromHoleTable;
+  });
 
-  if ((missingPlayers.length || courseLooksGarbled) && typeof createImageBitmap === 'function') {
+  // "CC" (and similar short Latin abbreviations) in the course title is the
+  // one thing the combined kor+eng model reads badly even when otherwise
+  // isolated correctly — re-crop just that word (located from this pass's
+  // own word positions, not hardcoded coordinates) and re-read it with an
+  // English-only model, which handles Latin letters far better.
+  const courseLooksGarbled = course && JUNK_CHAR_RE.test(course);
+  if (courseLooksGarbled && typeof createImageBitmap === 'function') {
     let bitmap;
     try {
       bitmap = await createImageBitmap(imageSource);
     } catch (err) {
       bitmap = null;
     }
-
     if (bitmap) {
       const refineWorker = await Tesseract.createWorker('eng', 1);
       try {
-        for (const player of missingPlayers) {
-          const result = await refinePlayerScore(player, ocrLines, bitmap, refineWorker);
-          if (result !== undefined) scores[player.id] = result;
-        }
-        if (courseLooksGarbled) {
-          const courseLine = findCourseLineObject(ocrLines);
-          course = await refineCourseName(course, courseLine, bitmap, refineWorker);
-        }
+        const ocrLines = groupWordsByLine(flattenWords(data.blocks));
+        const courseLine = findCourseLineObject(lines, ocrLines);
+        course = await refineCourseName(course, courseLine, bitmap, refineWorker);
       } finally {
         await refineWorker.terminate();
         if (bitmap.close) bitmap.close();
@@ -62,7 +76,7 @@ async function recognizeGolfZoneCapture(imageSource, onProgress) {
   }
 
   report(100);
-  return { rawText: text, date: extractDate(text), course, scores };
+  return { rawText: text, date, course, yardage, scores };
 }
 
 function flattenWords(blocks) {
@@ -79,11 +93,6 @@ function flattenWords(blocks) {
   return words;
 }
 
-// Large/bold UI text (the featured player's nickname, "CC" in a course
-// title, ...) sometimes gets tokenised one character per "word" instead of
-// as a single word. Group words by their shared line box, then for a given
-// target string, find the run of consecutive same-line words whose
-// concatenated text contains it, and return a combined bbox spanning them.
 function groupWordsByLine(words) {
   const lines = [];
   const indexByKey = new Map();
@@ -96,38 +105,6 @@ function groupWordsByLine(words) {
     lines[indexByKey.get(key)].words.push(w);
   });
   return lines;
-}
-
-function findTextSpan(ocrLines, target) {
-  for (const line of ocrLines) {
-    const joined = line.words.map((w) => w.text).join('');
-    const idx = joined.indexOf(target);
-    if (idx === -1) continue;
-
-    let pos = 0;
-    let startWord = null;
-    let endWord = null;
-    for (const w of line.words) {
-      const wStart = pos;
-      const wEnd = pos + w.text.length;
-      if (startWord === null && wEnd > idx) startWord = w;
-      if (wStart < idx + target.length) endWord = w;
-      pos = wEnd;
-    }
-    if (startWord && endWord) {
-      return {
-        bbox: {
-          x0: Math.min(startWord.bbox.x0, endWord.bbox.x0),
-          y0: Math.min(startWord.bbox.y0, endWord.bbox.y0),
-          x1: Math.max(startWord.bbox.x1, endWord.bbox.x1),
-          y1: Math.max(startWord.bbox.y1, endWord.bbox.y1),
-        },
-        lineBbox: line.bbox,
-        lineWords: line.words,
-      };
-    }
-  }
-  return null;
 }
 
 function cropAndScale(bitmap, x, y, w, h, scale) {
@@ -150,54 +127,29 @@ function toGrayscale(canvas) {
   ctx.putImageData(imgData, 0, 0);
 }
 
-// The featured player's row looks like "닉네임 [badge] 79 (+7)" where "79"
-// (total strokes) OCRs fine as a standalone word in the main pass, but the
-// small "(+7)" right next to it gets mangled by the kor+eng model (its "+"
-// is read as "1"). We locate "79" from the main pass's word boxes, crop the
-// region immediately to its right, and re-read just that with an
-// English-only model — which reads it correctly. If even that fails, we
-// fall back to computing the value arithmetically from the total strokes.
-async function refinePlayerScore(player, ocrLines, bitmap, worker) {
-  const nameSpan = findTextSpan(ocrLines, player.name);
-  if (!nameSpan) return undefined;
-
-  // The nickname's row can also contain small unrelated digits (a rating
-  // badge, etc). The actual total-strokes number is the right-most numeric
-  // token on the row, closest to where the score is displayed.
-  const numCandidates = nameSpan.lineWords.filter(
-    (w) => /^\d{1,3}$/.test(w.text) && w.bbox.x0 > nameSpan.bbox.x1
-  );
-  const numWord = numCandidates.sort((a, b) => b.bbox.x0 - a.bbox.x0)[0];
-  if (!numWord) return undefined;
-
-  const pad = 10;
-  const cropX = numWord.bbox.x1;
-  const cropY = Math.max(0, numWord.bbox.y0 - pad);
-  const cropW = 160;
-  const cropH = numWord.bbox.y1 - numWord.bbox.y0 + pad * 2;
-
-  try {
-    const canvas = cropAndScale(bitmap, cropX, cropY, cropW, cropH, 4);
-    toGrayscale(canvas);
-    await worker.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: '0123456789()+-' });
-    const { data } = await worker.recognize(canvas);
-    const m = (data.text || '').match(/\(\s*([+-]?\d+)\s*\)/);
-    if (m) return parseInt(m[1], 10);
-  } catch (err) {
-    // fall through to the arithmetic fallback below
+// The hole-by-hole table only appears for the featured player. Each half
+// (front/back nine) has a "Par ..." row immediately followed by a "Score
+// ..." row that ends with that half's relative-to-par subtotal (birdies
+// etc. already netted in). OCR mangles "Par"/"Score" spelling and the
+// boxed/circled per-hole marks inconsistently, but the row ORDER and the
+// trailing subtotal are reliable, so we don't need to parse the middle of
+// either row at all.
+function extractFeaturedPlayerScore(lines) {
+  let total = null;
+  for (let i = 0; i < lines.length - 1; i++) {
+    if (!/^(Par|Pr)\b/i.test(lines[i])) continue;
+    const m = lines[i + 1].match(/(-?\d+)\s*$/);
+    if (m) total = (total || 0) + parseInt(m[1], 10);
   }
-
-  // Best-effort fallback: relative-to-par score = total strokes − par.
-  return parseInt(numWord.text, 10) - DEFAULT_PAR;
+  return total;
 }
 
-// Locates the specific OCR line the course title was read from (same
-// position logic as extractCourse: the line right above the "코스X.X
-// 그린X.X" stat line), so garbled-word lookup never matches unrelated UI
-// chrome (e.g. the back-arrow icon, also misread as "<") elsewhere on screen.
-function findCourseLineObject(ocrLines) {
-  const idx = ocrLines.findIndex((l) => /(코스|그린)\s*[\d.]/.test(l.words.map((w) => w.text).join('')));
-  return idx > 0 ? ocrLines[idx - 1] : null;
+// Locates the specific OCR line the course title was read from, so garbled
+// word lookup never matches unrelated UI chrome (e.g. the back-arrow icon,
+// also sometimes misread as "<") elsewhere on screen.
+function findCourseLineObject(lines, ocrLines) {
+  const idx = findCourseLineIndex(lines);
+  return idx >= 0 && ocrLines[idx] ? ocrLines[idx] : null;
 }
 
 // Re-reads the garbled word(s) in the course title (e.g. "CC" misread as
@@ -213,7 +165,7 @@ async function refineCourseName(course, courseLine, bitmap, worker) {
   // including it would stretch the crop across unrelated text in between.
   const badWords = [];
   for (const w of courseLine.words) {
-    if (/[<>{}|~`]/.test(w.text)) {
+    if (JUNK_CHAR_RE.test(w.text)) {
       badWords.push(w);
     } else if (badWords.length) {
       break;
@@ -253,8 +205,19 @@ async function refineCourseName(course, courseLine, bitmap, worker) {
   return course;
 }
 
-function extractDate(text) {
-  const m = text.match(/(\d{2})[.\s](\d{1,2})[.\s](\d{1,2})\s*\d{1,2}[:시]\d{2}/);
+function extractDateFromLine(line) {
+  let m = line.match(/(\d{2})[.\s](\d{1,2})[.\s](\d{1,2})\s*\d{1,2}[:시]\d{2}/);
+  if (!m) {
+    // Sometimes every separator (dots/spaces/colon) is dropped by OCR,
+    // leaving one run of exactly 10 digits: YYMMDDHHmm.
+    m = line.match(/\b(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\b/);
+    if (m) {
+      const [, , mm, dd, hh, mi] = m;
+      if (!(+mm >= 1 && +mm <= 12 && +dd >= 1 && +dd <= 31 && +hh <= 23 && +mi <= 59)) {
+        return null;
+      }
+    }
+  }
   if (!m) return null;
   const [, yy, mm, dd] = m;
   const year = 2000 + parseInt(yy, 10);
@@ -262,14 +225,31 @@ function extractDate(text) {
   return `${year}-${pad(mm)}-${pad(dd)}`;
 }
 
+function extractDate(text) {
+  for (const line of text.split('\n')) {
+    const d = extractDateFromLine(line);
+    if (d) return d;
+  }
+  return null;
+}
+
+// Course total yardage ("White 5,551m") always has a comma-grouped 4-digit
+// meter value, which reliably tells it apart from the small putt-distance
+// mentions ("PT 11m") that appear later on the same screen.
+function extractYardage(text) {
+  const m = text.match(/(\d{1,2},\d{3})\s*m\b/);
+  if (!m) return null;
+  return parseInt(m[1].replace(/,/g, ''), 10);
+}
+
 // The GolfZone screen lays the three players out vertically (one "featured"
-// player with a large stylised score, two collapsed rows below with plain
-// text "닉네임 ... 숫자 (±N)"). The collapsed rows' nickname and score are on
-// the exact same OCR line, so matching line-by-line is far more reliable
-// than distance-in-flattened-text (right-padded whitespace before the score
-// can put the *next* player's nickname closer than the correct one). The
-// featured player's row is handled separately in refinePlayerScore, since
-// its score never reliably lands in the same text line.
+// player with a large stylised score and a hole-by-hole table, two
+// collapsed rows below with plain text "닉네임 ... 숫자 (±N)"). The collapsed
+// rows' nickname and score are on the exact same OCR line, so matching
+// line-by-line is far more reliable than distance-in-flattened-text
+// (right-padded whitespace before the score can put the *next* player's
+// nickname closer than the correct one). The featured player's score is
+// handled separately in extractFeaturedPlayerScore.
 function extractScores(lines) {
   const parenRe = /\(\s*([+-]?\d+)\s*\)/;
   const scores = {};
@@ -288,13 +268,25 @@ function extractScores(lines) {
   return scores;
 }
 
-// The course name has no fixed marker of its own, but it always sits right
-// above the "코스X.X 그린X.X ..." stat line, which OCRs far more reliably
-// (plain small text, no icons/photos overlapping it).
+// The course title is always exactly one line above the "코스X.X 그린X.X"
+// stat line. That marker text itself is sometimes OCR'd beyond recognition,
+// so as a fallback we anchor off the date line instead (date/time reads far
+// more reliably) — the course title is always exactly 2 lines above it,
+// with the stat line in between.
+function findCourseLineIndex(lines) {
+  const statIdx = lines.findIndex((l) => /(코스|그린)\s*[\d.]/.test(l));
+  if (statIdx > 0) return statIdx - 1;
+
+  const dateIdx = lines.findIndex((l) => extractDateFromLine(l) !== null);
+  if (dateIdx >= 2) return dateIdx - 2;
+
+  return -1;
+}
+
 function extractCourse(lines) {
-  const statLineIdx = lines.findIndex((l) => /(코스|그린)\s*[\d.]/.test(l));
-  if (statLineIdx > 0) {
-    return lines[statLineIdx - 1].replace(/[>›]+\s*$/, '').trim();
+  const idx = findCourseLineIndex(lines);
+  if (idx >= 0) {
+    return lines[idx].replace(/[>›]+\s*$/, '').trim();
   }
 
   const junkPattern = /^[\d:%.\s]*$/;
