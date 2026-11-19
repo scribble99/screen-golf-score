@@ -85,6 +85,7 @@ function renderCourseList() {
   const datalist = document.getElementById('courseList');
   const courses = [...new Set(allGames.map((g) => g.course))].sort();
   datalist.innerHTML = courses.map((c) => `<option value="${c}">`).join('');
+  setKnownCourses(courses);
 }
 
 function renderGameList() {

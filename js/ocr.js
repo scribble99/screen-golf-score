@@ -29,7 +29,7 @@ async function recognizeGolfZoneCapture(imageSource, onProgress) {
   const text = data.text || '';
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
 
-  const scores = extractScores(lines);
+  const { scores, strokes } = extractScores(lines);
   let course = extractCourse(lines);
   const yardage = extractYardage(text);
   const date = extractDate(text);
@@ -49,13 +49,27 @@ async function recognizeGolfZoneCapture(imageSource, onProgress) {
     if (fromHoleTable !== null) scores[player.id] = fromHoleTable;
   });
 
+  // The two collapsed rows' "(±N)" often loses just its +/- sign to OCR
+  // (e.g. "(-4)" read as "(4)") even though the stroke total right before it
+  // ("68") and the course's total par (from the hole table, always plain
+  // positive digits) both read fine. Recomputing relative = strokes − par
+  // sidesteps the unreliable sign glyph entirely, so prefer it whenever
+  // we have both numbers.
+  const coursePar = extractCoursePar(lines);
+  if (coursePar !== null) {
+    PLAYERS.forEach((player) => {
+      if (strokes[player.id] !== undefined) {
+        scores[player.id] = strokes[player.id] - coursePar;
+      }
+    });
+  }
+
   // "CC" (and similar short Latin abbreviations) in the course title is the
   // one thing the combined kor+eng model reads badly even when otherwise
   // isolated correctly — re-crop just that word (located from this pass's
   // own word positions, not hardcoded coordinates) and re-read it with an
   // English-only model, which handles Latin letters far better.
-  const courseLooksGarbled = course && JUNK_CHAR_RE.test(course);
-  if (courseLooksGarbled && typeof createImageBitmap === 'function') {
+  if (course && JUNK_CHAR_RE.test(course) && typeof createImageBitmap === 'function') {
     let bitmap;
     try {
       bitmap = await createImageBitmap(imageSource);
@@ -73,6 +87,14 @@ async function recognizeGolfZoneCapture(imageSource, onProgress) {
         if (bitmap.close) bitmap.close();
       }
     }
+  }
+
+  // Last resort: if the course name still looks garbled, check it against
+  // courses already played before (cross-validating against the existing
+  // game history) — a unique match on the Korean-only portion is a much
+  // stronger signal than anything OCR alone can offer.
+  if (course && JUNK_CHAR_RE.test(course)) {
+    course = fuzzyMatchKnownCourse(course);
   }
 
   report(100);
@@ -144,6 +166,19 @@ function extractFeaturedPlayerScore(lines) {
   return total;
 }
 
+// The course's total par is the sum of the "Par ..." rows' own trailing
+// totals (e.g. 36 + 36 = 72, or 36 + 37 = 73 for an uneven course) — always
+// plain positive digits, read very reliably.
+function extractCoursePar(lines) {
+  let total = null;
+  lines.forEach((line) => {
+    if (!/^(Par|Pr)\b/i.test(line)) return;
+    const m = line.match(/(\d+)\s*$/);
+    if (m) total = (total || 0) + parseInt(m[1], 10);
+  });
+  return total;
+}
+
 // Locates the specific OCR line the course title was read from, so garbled
 // word lookup never matches unrelated UI chrome (e.g. the back-arrow icon,
 // also sometimes misread as "<") elsewhere on screen.
@@ -205,21 +240,17 @@ async function refineCourseName(course, courseLine, bitmap, worker) {
   return course;
 }
 
+// OCR drops date separators (dots/space/colon) inconsistently — sometimes
+// all of them ("2611060921"), sometimes only some ("26.032909:20"). A single
+// pattern with every separator optional handles every combination, as long
+// as each field stays exactly 2 digits (which GolfZone always zero-pads).
 function extractDateFromLine(line) {
-  let m = line.match(/(\d{2})[.\s](\d{1,2})[.\s](\d{1,2})\s*\d{1,2}[:시]\d{2}/);
-  if (!m) {
-    // Sometimes every separator (dots/spaces/colon) is dropped by OCR,
-    // leaving one run of exactly 10 digits: YYMMDDHHmm.
-    m = line.match(/\b(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\b/);
-    if (m) {
-      const [, , mm, dd, hh, mi] = m;
-      if (!(+mm >= 1 && +mm <= 12 && +dd >= 1 && +dd <= 31 && +hh <= 23 && +mi <= 59)) {
-        return null;
-      }
-    }
-  }
+  const m = line.match(/(\d{2})[.\s]?(\d{2})[.\s]?(\d{2})[.\s]?(\d{2})[:시]?(\d{2})/);
   if (!m) return null;
-  const [, yy, mm, dd] = m;
+  const [, yy, mm, dd, hh, mi] = m;
+  if (!(+mm >= 1 && +mm <= 12 && +dd >= 1 && +dd <= 31 && +hh <= 23 && +mi <= 59)) {
+    return null;
+  }
   const year = 2000 + parseInt(yy, 10);
   const pad = (v) => String(v).padStart(2, '0');
   return `${year}-${pad(mm)}-${pad(dd)}`;
@@ -251,21 +282,23 @@ function extractYardage(text) {
 // nickname closer than the correct one). The featured player's score is
 // handled separately in extractFeaturedPlayerScore.
 function extractScores(lines) {
-  const parenRe = /\(\s*([+-]?\d+)\s*\)/;
+  const strokesRe = /(\d{2,3})\D{0,6}\(\s*([+-]?\d+)\s*\)/;
   const scores = {};
+  const strokes = {};
   const usedLines = new Set();
 
   PLAYERS.forEach((player) => {
     const lineIdx = lines.findIndex((line, i) => !usedLines.has(i) && line.includes(player.name));
     if (lineIdx === -1) return;
-    const m = lines[lineIdx].match(parenRe);
+    const m = lines[lineIdx].match(strokesRe);
     if (m) {
-      scores[player.id] = parseInt(m[1], 10);
+      strokes[player.id] = parseInt(m[1], 10);
+      scores[player.id] = parseInt(m[2], 10);
       usedLines.add(lineIdx);
     }
   });
 
-  return scores;
+  return { scores, strokes };
 }
 
 // The course title is always exactly one line above the "코스X.X 그린X.X"
@@ -281,6 +314,46 @@ function findCourseLineIndex(lines) {
   if (dateIdx >= 2) return dateIdx - 2;
 
   return -1;
+}
+
+// Populated by app.js from the game list (seed history + whatever the user
+// has entered) so OCR can cross-check a shaky course-name read against
+// places this group has actually played before.
+let KNOWN_COURSES = [];
+function setKnownCourses(list) {
+  KNOWN_COURSES = list || [];
+}
+
+function stripToKoreanSyllables(s) {
+  return (s || '').replace(/[^가-힣]/g, '');
+}
+
+// Only ever called when `course` still contains obvious OCR junk. Composed
+// Hangul syllables are the one part of a course name OCR reads reliably, so
+// comparing just that (ignoring spaces/"CC"/dashes/digits/stray symbols)
+// against known course names can confidently recover names that still have
+// garbage mixed in elsewhere in the string. Only acts on an unambiguous
+// match — if two known courses share the same Korean-only form (e.g. "써미트
+// M/S" vs "써미트 S/K"), the Latin suffix is exactly the unreliable part, so
+// we leave the text as-is rather than guess.
+function fuzzyMatchKnownCourse(course) {
+  const stripped = stripToKoreanSyllables(course);
+  if (!stripped || !KNOWN_COURSES.length) return course;
+
+  const exact = [...new Set(KNOWN_COURSES.filter((k) => stripToKoreanSyllables(k) === stripped))];
+  if (exact.length === 1) return exact[0];
+
+  const prefixed = [
+    ...new Set(
+      KNOWN_COURSES.filter((k) => {
+        const ks = stripToKoreanSyllables(k);
+        return ks && stripped.startsWith(ks);
+      })
+    ),
+  ];
+  if (prefixed.length === 1) return prefixed[0];
+
+  return course;
 }
 
 function extractCourse(lines) {

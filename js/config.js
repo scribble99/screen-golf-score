@@ -6,6 +6,10 @@ const PLAYERS = [
 
 const PLAYER_IDS = PLAYERS.map((p) => p.id);
 
+// Column order for the 통계 screen / share image only (data entry, the game
+// list, etc. keep PLAYER_IDS order).
+const STATS_DISPLAY_ORDER = ['kim_hm', 'kim_mk', 'park'];
+
 // Local-only display-name overrides (e.g. real names instead of nicknames).
 // Never hardcoded here — only ever set at runtime from a setting stored in
 // IndexedDB (see 설정 탭), so the public source/repo only ever shows

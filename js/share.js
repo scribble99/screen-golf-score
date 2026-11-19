@@ -23,6 +23,13 @@ function fmtNum(v, digits = 0) {
   return digits > 0 ? `${sign}${v.toFixed(digits)}` : `${sign}${Math.round(v)}`;
 }
 
+// Same rounding as fmtNum but never shows a leading "+" — for values that
+// are always non-negative (e.g. standard deviation), a sign is just noise.
+function fmtNumUnsigned(v, digits = 0) {
+  if (v === null || v === undefined || Number.isNaN(v)) return '-';
+  return digits > 0 ? v.toFixed(digits) : `${Math.round(v)}`;
+}
+
 function fmtMoney(v) {
   if (v === null || v === undefined) return '-';
   const sign = v > 0 ? '+' : v < 0 ? '-' : '';
@@ -35,37 +42,38 @@ function fmtScore(v) {
 }
 
 function buildRows(result) {
-  const names = PLAYER_IDS.map(playerName);
+  const order = STATS_DISPLAY_ORDER;
+  const names = order.map(playerName);
   const rows = [];
 
-  rows.push({ type: 'highlight', label: '핸디\n(최근10경기 최고·최저 제외 평균)', values: PLAYER_IDS.map((p) => fmtNum(result.stats[p].handicap, 2)) });
-  rows.push({ type: 'data', label: '지난번 대비 등락', values: PLAYER_IDS.map((p) => fmtNum(result.stats[p].handicapDelta, 2)) });
+  rows.push({ type: 'highlight', label: '핸디\n(최근10경기 최고·최저 제외 평균)', values: order.map((p) => fmtNum(result.stats[p].handicap, 1)) });
+  rows.push({ type: 'data', label: '지난번 대비 등락', values: order.map((p) => fmtNum(result.stats[p].handicapDelta, 1)) });
 
   rows.push({ type: 'section', label: '누적', values: ['', '', ''] });
-  rows.push({ type: 'data', label: '평균 순위', values: PLAYER_IDS.map((p) => fmtNum(result.stats[p].avgRank, 2)) });
-  rows.push({ type: 'data', label: '베스트스코어', values: PLAYER_IDS.map((p) => fmtScore(result.stats[p].best)) });
-  rows.push({ type: 'data', label: '워스트스코어', values: PLAYER_IDS.map((p) => fmtScore(result.stats[p].worst)) });
-  rows.push({ type: 'data', label: '표준편차', values: PLAYER_IDS.map((p) => fmtNum(result.stats[p].stdev, 2)) });
-  rows.push({ type: 'data', label: '손익(원)', values: PLAYER_IDS.map((p) => fmtMoney(result.stats[p].money)) });
+  rows.push({ type: 'data', label: '평균 순위', values: order.map((p) => fmtNum(result.stats[p].avgRank, 1)) });
+  rows.push({ type: 'data', label: '베스트스코어', values: order.map((p) => fmtScore(result.stats[p].best)) });
+  rows.push({ type: 'data', label: '워스트스코어', values: order.map((p) => fmtScore(result.stats[p].worst)) });
+  rows.push({ type: 'data', label: '표준편차', values: order.map((p) => fmtNumUnsigned(result.stats[p].stdev, 1)) });
+  rows.push({ type: 'data', label: '손익(원)', values: order.map((p) => fmtMoney(result.stats[p].money)) });
 
   rows.push({ type: 'section', label: '누적 순위별 횟수\n(핸디 반영)', values: ['', '', ''] });
   [['단독1위', 1], ['공동1위', 1.5], ['단독2위', 2], ['공동2위', 2.5], ['단독3위', 3]].forEach(([label, r]) => {
-    rows.push({ type: 'data', label, values: PLAYER_IDS.map((p) => result.stats[p].rankBucketsHandicap[r] ?? 0) });
+    rows.push({ type: 'data', label, values: order.map((p) => result.stats[p].rankBucketsHandicap[r] ?? 0) });
   });
 
   rows.push({ type: 'section', label: '누적 순위별 횟수\n(핸디 미반영)', values: ['', '', ''] });
   [['단독1위', 1], ['공동1위', 1.5], ['단독2위', 2], ['공동2위', 2.5], ['단독3위', 3]].forEach(([label, r]) => {
-    rows.push({ type: 'data', label, values: PLAYER_IDS.map((p) => result.stats[p].rankBucketsRaw[r] ?? 0) });
+    rows.push({ type: 'data', label, values: order.map((p) => result.stats[p].rankBucketsRaw[r] ?? 0) });
   });
 
-  rows.push({ type: 'data', label: '최근 10경기 추세\n(+면 하락세, -면 상승세)', values: PLAYER_IDS.map((p) => fmtNum(result.stats[p].trend, 2)) });
+  rows.push({ type: 'data', label: '최근 10경기 추세\n(+면 하락세, -면 상승세)', values: order.map((p) => fmtNum(result.stats[p].trend, 1)) });
 
   rows.push({ type: 'section', label: '경기 결과\n(괄호=당일 핸디 대비 순위)', values: ['', '', ''] });
   result.recentGames.forEach((g) => {
     rows.push({
       type: 'data',
       label: g.date,
-      values: PLAYER_IDS.map((p) => `${fmtScore(g.scores[p])}(${g.rankAdj[p]})`),
+      values: order.map((p) => `${fmtScore(g.scores[p])}(${g.rankAdj[p]})`),
     });
   });
 
@@ -74,7 +82,7 @@ function buildRows(result) {
     rows.push({
       type: 'data',
       label: result.justDropped.date,
-      values: PLAYER_IDS.map((p) => `${fmtScore(result.justDropped.scores[p])}(${result.justDropped.rankAdj[p]})`),
+      values: order.map((p) => `${fmtScore(result.justDropped.scores[p])}(${result.justDropped.rankAdj[p]})`),
     });
   }
 
