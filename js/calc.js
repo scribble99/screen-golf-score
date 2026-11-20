@@ -247,23 +247,98 @@ function computeHandicapGaps(stats) {
   return pairs;
 }
 
-// Top games (by default up to 10) where `playerId` won solo first place by
-// handicap-adjusted score, ranked by how big a margin they won by — i.e.
-// how much lower their adjusted score was than the next-best opponent's.
+function mean(arr) {
+  return arr.length ? average(arr) : null;
+}
+
+// z-score of each value against the group's own mean/stdev — lets factors
+// on unrelated scales (score strokes vs. meters) combine into one weighted
+// sum. A zero-stdev group (e.g. only one course, or every course tied)
+// collapses to all-zero so it contributes nothing rather than dividing by 0.
+function zScores(values) {
+  const present = values.filter((v) => v !== null);
+  if (present.length < 2) return values.map(() => 0);
+  const m = average(present);
+  const sd = populationStdev(present);
+  return values.map((v) => (v === null || sd === 0 ? 0 : (v - m) / sd));
+}
+
+// Relative weight of each factor in the recommendation composite score.
+// Listed roughly in the priority order requested: handicap-adjusted
+// performance first, then raw score, then margin over the other two
+// players, then a mild preference for shorter courses.
+const RECOMMEND_WEIGHTS = {
+  adjusted: 0.35, // 핸디 대비 스코어 (낮을수록 좋음)
+  raw: 0.25, // 핸디 없는 절대 스코어 (낮을수록 좋음)
+  margin: 0.25, // 다른 두 선수와의 격차 (클수록 좋음)
+  yardage: 0.15, // 전장 길이 (짧을수록 좋음, 선호도이지 필터 아님)
+};
+
+// Recommends courses for `playerId`, aggregated by course name so repeat
+// visits to the same course contribute one averaged record instead of N
+// separate entries ("동일 코스 기록은 평균으로 적용"). Each course is scored
+// on four factors, each standardized (z-score) against the player's own
+// course list so strokes and meters combine on a comparable scale, then
+// combined into one weighted composite:
+//   - avgAdjusted: 평균 핸디 대비 스코어 — 그 코스에서 본인 핸디 대비 얼마나
+//     잘 쳤는지(낮을수록 좋음). 메인 신호.
+//   - avgRaw: 평균 절대 스코어(파 대비, 핸디 미반영) — 핸디가 흔들려도 실제
+//     타수 자체가 낮은 코스를 반영(낮을수록 좋음).
+//   - avgMargin: 평균 격차 — 나머지 두 선수의 핸디 대비 스코어 평균 대비
+//     본인이 얼마나 앞섰는지(핸디 대비 기준, 클수록 좋음 = 상대를 압도).
+//   - avgYardage: 평균 전장(m) — 짧을수록 가점(강제 필터가 아니라 선호 가중치).
+// Only games with an established handicap (adjusted !== null) are used, so
+// every course's four factors come from the same basis; courses with too
+// little handicap history yet are simply excluded rather than scored on
+// incomplete data. Returns up to `limit` courses sorted by composite score.
 function computeCourseRecommendations(timeline, playerId, limit) {
-  const wins = [];
+  const others = PLAYER_IDS.filter((p) => p !== playerId);
+  const byCourse = new Map();
+
   timeline.forEach((game) => {
-    if (game.rankAdj[playerId] !== 1) return;
-    const othersAdj = PLAYER_IDS.filter((p) => p !== playerId).map((p) => game.adjusted[p]);
-    const margin = Math.min(...othersAdj) - game.adjusted[playerId];
-    wins.push({
-      date: game.date,
-      course: game.course,
-      yardage: game.yardage ?? null,
-      scores: game.scores,
-      margin,
-    });
+    if (game.adjusted[playerId] === null) return;
+    if (!byCourse.has(game.course)) {
+      byCourse.set(game.course, {
+        course: game.course,
+        adjustedList: [],
+        rawList: [],
+        marginList: [],
+        yardageList: [],
+        dates: [],
+      });
+    }
+    const entry = byCourse.get(game.course);
+    entry.adjustedList.push(game.adjusted[playerId]);
+    entry.rawList.push(game.scores[playerId]);
+    const othersAvgAdjusted = average(others.map((p) => game.adjusted[p]));
+    entry.marginList.push(othersAvgAdjusted - game.adjusted[playerId]);
+    if (game.yardage) entry.yardageList.push(game.yardage);
+    entry.dates.push(game.date);
   });
-  wins.sort((a, b) => b.margin - a.margin);
-  return wins.slice(0, limit || 10);
+
+  const courses = [...byCourse.values()].map((entry) => ({
+    course: entry.course,
+    games: entry.adjustedList.length,
+    lastDate: entry.dates.reduce((a, b) => (b > a ? b : a)),
+    avgAdjusted: mean(entry.adjustedList),
+    avgRaw: mean(entry.rawList),
+    avgMargin: mean(entry.marginList),
+    avgYardage: mean(entry.yardageList),
+  }));
+
+  const zAdjusted = zScores(courses.map((c) => c.avgAdjusted));
+  const zRaw = zScores(courses.map((c) => c.avgRaw));
+  const zMargin = zScores(courses.map((c) => c.avgMargin));
+  const zYardage = zScores(courses.map((c) => c.avgYardage));
+
+  courses.forEach((c, i) => {
+    c.score =
+      RECOMMEND_WEIGHTS.adjusted * -zAdjusted[i] +
+      RECOMMEND_WEIGHTS.raw * -zRaw[i] +
+      RECOMMEND_WEIGHTS.margin * zMargin[i] +
+      RECOMMEND_WEIGHTS.yardage * -zYardage[i];
+  });
+
+  courses.sort((a, b) => b.score - a.score);
+  return courses.slice(0, limit || 10);
 }

@@ -28,7 +28,7 @@
   <main id="app">
     <section id="tab-stats" class="tab-panel active">
       <button id="shareBtn" class="primary-btn">공유하기</button>
-      <button id="saveImageBtn" class="ghost-btn">이미지 저장</button>
+      <button id="saveImageBtn" class="ghost-btn" style="display:none;">이미지 저장</button>
       <div id="statsContainer">불러오는 중...</div>
     </section>
 
@@ -74,7 +74,7 @@
     <section id="tab-recommend" class="tab-panel">
       <div class="card">
         <h2>코스 추천 (박프로장난아 기준)</h2>
-        <p class="hint">핸디 대비 단독 1위를 기록했고, 2위와의 점수차가 가장 컸던(압도적으로 이긴) 경기 순으로 보여줍니다.</p>
+        <p class="hint">같은 구장은 여러 번 친 기록을 평균내어 한 줄로 보여줍니다. ① 핸디 대비 스코어, ② 핸디 없는 절대 스코어, ③ 다른 두 선수와의 격차, ④ 전장 길이(짧을수록 선호)를 종합 점수화해 추천 순으로 정렬합니다.</p>
         <div id="recommendContainer">불러오는 중...</div>
       </div>
     </section>

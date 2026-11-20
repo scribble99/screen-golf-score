@@ -57,20 +57,74 @@ function switchTab(name) {
   document.querySelector(`.tab-btn[data-tab="${name}"]`).click();
 }
 
+// Some Android keyboards (notably Samsung Keyboard) don't show a "-" key on
+// the numeric keypad that type="number" triggers, making negative scores
+// impossible to type directly. To work around that, each score input is
+// paired with an explicit sign-toggle button: the number field only ever
+// holds a non-negative magnitude, and the button tracks +/- separately.
 function buildScoreInputs() {
   const container = document.getElementById('scoreInputs');
   container.innerHTML = '';
   PLAYERS.forEach((p) => {
     const wrap = document.createElement('label');
     wrap.textContent = `${playerName(p.id)} 스코어(파 대비)`;
+    const row = document.createElement('div');
+    row.className = 'score-input-row';
+
+    const signBtn = document.createElement('button');
+    signBtn.type = 'button';
+    signBtn.className = 'sign-toggle-btn';
+    signBtn.id = `sign_${p.id}`;
+    signBtn.dataset.negative = 'false';
+    signBtn.textContent = '+';
+    signBtn.setAttribute('aria-label', '부호 전환(+/-)');
+    signBtn.addEventListener('click', () => {
+      const negative = signBtn.dataset.negative !== 'true';
+      signBtn.dataset.negative = String(negative);
+      signBtn.textContent = negative ? '-' : '+';
+      signBtn.classList.toggle('negative', negative);
+    });
+
     const input = document.createElement('input');
     input.type = 'number';
     input.id = `score_${p.id}`;
+    input.min = '0';
+    input.inputMode = 'numeric';
     input.required = true;
-    input.placeholder = '예: -3';
-    wrap.appendChild(input);
+    input.placeholder = '예: 3';
+
+    row.appendChild(signBtn);
+    row.appendChild(input);
+    wrap.appendChild(row);
     container.appendChild(wrap);
   });
+}
+
+// Sets a score input + its sign toggle from a signed value (used when
+// loading an existing game for edit/OCR-fill, or resetting the form).
+function setScoreInputValue(playerId, value) {
+  const input = document.getElementById(`score_${playerId}`);
+  const signBtn = document.getElementById(`sign_${playerId}`);
+  if (value === null || value === undefined || value === '') {
+    input.value = '';
+    signBtn.dataset.negative = 'false';
+    signBtn.textContent = '+';
+    signBtn.classList.remove('negative');
+    return;
+  }
+  const num = Number(value);
+  const negative = num < 0;
+  input.value = Math.abs(num);
+  signBtn.dataset.negative = String(negative);
+  signBtn.textContent = negative ? '-' : '+';
+  signBtn.classList.toggle('negative', negative);
+}
+
+function readScoreInputValue(playerId) {
+  const input = document.getElementById(`score_${playerId}`);
+  const signBtn = document.getElementById(`sign_${playerId}`);
+  const magnitude = Math.abs(parseInt(input.value, 10));
+  return signBtn.dataset.negative === 'true' ? -magnitude : magnitude;
 }
 
 function renderStats(result) {
@@ -79,7 +133,7 @@ function renderStats(result) {
     container.innerHTML = '<p>등록된 경기가 없습니다.</p>';
     return;
   }
-  const { names, rows } = buildRows(result);
+  const { names, rows } = buildRows(result, { signed: false });
   let html = '<table class="stats-table"><thead><tr><th></th>';
   names.forEach((n) => (html += `<th>${n}</th>`));
   html += '</tr></thead><tbody>';
@@ -161,18 +215,22 @@ function renderRecommend(result) {
     container.innerHTML = '<p>등록된 경기가 없습니다.</p>';
     return;
   }
-  const recs = computeCourseRecommendations(result.timeline, 'park', 10);
+  const recs = computeCourseRecommendations(result.timeline, 'park', 20);
   if (!recs.length) {
-    container.innerHTML = '<p>박프로장난아가 핸디 대비 단독 1위를 기록한 경기가 아직 없습니다.</p>';
+    container.innerHTML = '<p>박프로장난아의 핸디가 집계된 경기가 아직 없습니다.</p>';
     return;
   }
-  let html = '<table class="list-table"><thead><tr><th>순위</th><th>날짜</th><th>구장</th><th>전장(m)</th>';
-  PLAYERS.forEach((p) => (html += `<th>${playerName(p.id)}</th>`));
-  html += '</tr></thead><tbody>';
+  let html = '<table class="list-table"><thead><tr><th>순위</th><th>구장</th><th>방문</th><th>평균<br>핸디대비</th><th>평균<br>절대스코어</th><th>평균<br>격차</th><th>평균<br>전장(m)</th></tr></thead><tbody>';
   recs.forEach((r, i) => {
-    html += `<tr><td>${i + 1}</td><td>${r.date}</td><td>${r.course}</td><td>${r.yardage ? r.yardage.toLocaleString('ko-KR') : '-'}</td>`;
-    PLAYERS.forEach((p) => (html += `<td>${fmtScore(r.scores[p.id])}</td>`));
-    html += '</tr>';
+    html += `<tr>
+      <td>${i + 1}</td>
+      <td class="row-label">${r.course}</td>
+      <td>${r.games}</td>
+      <td>${fmtNum(r.avgAdjusted, 1)}</td>
+      <td>${fmtNum(r.avgRaw, 1)}</td>
+      <td>${fmtNum(r.avgMargin, 1)}</td>
+      <td>${r.avgYardage ? Math.round(r.avgYardage).toLocaleString('ko-KR') : '-'}</td>
+    </tr>`;
   });
   html += '</tbody></table>';
   container.innerHTML = html;
@@ -185,7 +243,7 @@ function startEditGame(id) {
   document.getElementById('f_date').value = game.date;
   document.getElementById('f_course').value = game.course;
   document.getElementById('f_yardage').value = game.yardage || '';
-  PLAYERS.forEach((p) => (document.getElementById(`score_${p.id}`).value = game.scores[p.id]));
+  PLAYERS.forEach((p) => setScoreInputValue(p.id, game.scores[p.id]));
   document.getElementById('cancelEditBtn').style.display = '';
   switchTab('add');
 }
@@ -203,7 +261,7 @@ function wireForm() {
     const id = document.getElementById('f_editId').value;
     const scores = {};
     PLAYERS.forEach((p) => {
-      scores[p.id] = parseInt(document.getElementById(`score_${p.id}`).value, 10);
+      scores[p.id] = readScoreInputValue(p.id);
     });
     const yardageVal = document.getElementById('f_yardage').value;
     const game = {
@@ -219,6 +277,7 @@ function wireForm() {
       await GolfDB.addGame(game);
     }
     form.reset();
+    PLAYERS.forEach((p) => setScoreInputValue(p.id, ''));
     document.getElementById('f_editId').value = '';
     document.getElementById('cancelEditBtn').style.display = 'none';
     document.getElementById('ocrStatus').textContent = '';
@@ -228,6 +287,7 @@ function wireForm() {
 
   document.getElementById('cancelEditBtn').addEventListener('click', () => {
     form.reset();
+    PLAYERS.forEach((p) => setScoreInputValue(p.id, ''));
     document.getElementById('f_editId').value = '';
     document.getElementById('cancelEditBtn').style.display = 'none';
   });
@@ -287,7 +347,7 @@ async function runOcrAndFill(imageSource) {
     if (parsed.yardage) document.getElementById('f_yardage').value = parsed.yardage;
     PLAYERS.forEach((p) => {
       if (parsed.scores[p.id] !== undefined) {
-        document.getElementById(`score_${p.id}`).value = parsed.scores[p.id];
+        setScoreInputValue(p.id, parsed.scores[p.id]);
       }
     });
     status.textContent = '인식 완료. 값을 확인한 뒤 저장하세요.';

@@ -43,9 +43,9 @@ const FONT_VALUE_BOLD = `bold ${Math.round(13 * FONT_SCALE * OTHER_FONT_MULT)}px
 // *original* (pre-doubling) value size, so they stay the biggest element.
 const FONT_HANDICAP_VALUE = `bold ${Math.round(13 * FONT_SCALE * 3)}px "Malgun Gothic", sans-serif`;
 
-function fmtNum(v, digits = 0) {
+function fmtNum(v, digits = 0, signed = true) {
   if (v === null || v === undefined || Number.isNaN(v)) return '-';
-  const sign = v > 0 ? '+' : '';
+  const sign = signed && v > 0 ? '+' : '';
   return digits > 0 ? `${sign}${v.toFixed(digits)}` : `${sign}${Math.round(v)}`;
 }
 
@@ -56,31 +56,34 @@ function fmtNumUnsigned(v, digits = 0) {
   return digits > 0 ? v.toFixed(digits) : `${Math.round(v)}`;
 }
 
-function fmtMoney(v) {
+function fmtMoney(v, signed = true) {
   if (v === null || v === undefined) return '-';
-  const sign = v > 0 ? '+' : v < 0 ? '-' : '';
+  const sign = v > 0 ? (signed ? '+' : '') : v < 0 ? '-' : '';
   return `${sign}${Math.abs(v).toLocaleString('ko-KR')}`;
 }
 
-function fmtScore(v) {
+function fmtScore(v, signed = true) {
   if (v === null || v === undefined) return '-';
-  return v > 0 ? `+${v}` : `${v}`;
+  return signed && v > 0 ? `+${v}` : `${v}`;
 }
 
-function buildRows(result) {
+// `signed` controls whether positive values get a leading "+". Both the
+// on-screen 통계 탭 and the shared/saved image pass signed:false (양수는
+// 부호 없이 표시); the default stays true only as a safety fallback.
+function buildRows(result, { signed = true } = {}) {
   const order = PLAYER_IDS;
   const names = order.map(playerName);
   const rows = [];
 
-  rows.push({ type: 'highlight', label: '핸디\n(최근10경기 최고·최저 제외 평균)', values: order.map((p) => fmtNum(result.stats[p].handicap, 1)) });
-  rows.push({ type: 'data', label: '지난번 대비 등락', values: order.map((p) => fmtNum(result.stats[p].handicapDelta, 1)) });
+  rows.push({ type: 'highlight', label: '핸디\n(최근10경기 최고·최저 제외 평균)', values: order.map((p) => fmtNum(result.stats[p].handicap, 1, signed)) });
+  rows.push({ type: 'data', label: '지난번 대비 등락', values: order.map((p) => fmtNum(result.stats[p].handicapDelta, 1, signed)) });
 
   rows.push({ type: 'section', label: '누적', values: ['', '', ''] });
-  rows.push({ type: 'data', label: '평균 순위', values: order.map((p) => fmtNum(result.stats[p].avgRank, 1)) });
-  rows.push({ type: 'data', label: '베스트스코어', values: order.map((p) => fmtScore(result.stats[p].best)) });
-  rows.push({ type: 'data', label: '워스트스코어', values: order.map((p) => fmtScore(result.stats[p].worst)) });
+  rows.push({ type: 'data', label: '평균 순위', values: order.map((p) => fmtNum(result.stats[p].avgRank, 1, signed)) });
+  rows.push({ type: 'data', label: '베스트스코어', values: order.map((p) => fmtScore(result.stats[p].best, signed)) });
+  rows.push({ type: 'data', label: '워스트스코어', values: order.map((p) => fmtScore(result.stats[p].worst, signed)) });
   rows.push({ type: 'data', label: '표준편차', values: order.map((p) => fmtNumUnsigned(result.stats[p].stdev, 1)) });
-  rows.push({ type: 'data', label: '손익(원)', values: order.map((p) => fmtMoney(result.stats[p].money)) });
+  rows.push({ type: 'data', label: '손익(원)', values: order.map((p) => fmtMoney(result.stats[p].money, signed)) });
 
   rows.push({ type: 'section', label: '누적 순위별 횟수\n(핸디 반영)', values: ['', '', ''] });
   [['단독1위', 1], ['공동1위', 1.5], ['단독2위', 2], ['공동2위', 2.5], ['단독3위', 3]].forEach(([label, r]) => {
@@ -92,14 +95,14 @@ function buildRows(result) {
     rows.push({ type: 'data', label, values: order.map((p) => result.stats[p].rankBucketsRaw[r] ?? 0) });
   });
 
-  rows.push({ type: 'data', label: '최근 10경기 추세\n(+면 하락세, -면 상승세)', values: order.map((p) => fmtNum(result.stats[p].trend, 1)) });
+  rows.push({ type: 'data', label: '최근 10경기 추세\n(+면 하락세, -면 상승세)', values: order.map((p) => fmtNum(result.stats[p].trend, 1, signed)) });
 
   rows.push({ type: 'section', label: '경기 결과\n(괄호=당일 핸디 대비 순위)', values: ['', '', ''] });
   result.recentGames.forEach((g) => {
     rows.push({
       type: 'data',
       label: g.date,
-      values: order.map((p) => `${fmtScore(g.scores[p])}(${g.rankAdj[p]})`),
+      values: order.map((p) => `${fmtScore(g.scores[p], signed)}(${g.rankAdj[p]})`),
     });
   });
 
@@ -108,7 +111,7 @@ function buildRows(result) {
     rows.push({
       type: 'data',
       label: result.justDropped.date,
-      values: order.map((p) => `${fmtScore(result.justDropped.scores[p])}(${result.justDropped.rankAdj[p]})`),
+      values: order.map((p) => `${fmtScore(result.justDropped.scores[p], signed)}(${result.justDropped.rankAdj[p]})`),
     });
   }
 
@@ -187,7 +190,7 @@ function measureColW(ctx, rows, names) {
 }
 
 async function buildShareImageCanvas(result, scale = 3) {
-  const { names, rows } = buildRows(result);
+  const { names, rows } = buildRows(result, { signed: false });
   // Higher = sharper text in the exported PNG. Kept as a whole number so
   // every CSS-unit coordinate below lands on an exact device pixel instead
   // of a fractional one (which forces anti-aliasing blur on an otherwise
