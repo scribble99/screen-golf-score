@@ -1,4 +1,4 @@
-const CACHE_NAME = 'golf-score-cache-v8';
+const CACHE_NAME = 'golf-score-cache-v9';
 const ASSETS = [
   './',
   './index.html',
@@ -51,7 +51,13 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
   event.respondWith(
-    fetch(event.request)
+    // GitHub Pages sends Cache-Control: max-age=600 on every asset, and a
+    // plain fetch() honors that via the browser's own HTTP cache — so a
+    // "network-first" fetch could silently resolve from that disk cache for
+    // up to 10 minutes after a deploy instead of actually hitting the
+    // network. {cache: 'no-store'} forces a real network round-trip every
+    // time so a fresh deploy shows up immediately.
+    fetch(event.request, { cache: 'no-store' })
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
